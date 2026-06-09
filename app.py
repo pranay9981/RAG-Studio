@@ -1,6 +1,5 @@
 import streamlit as st
 
-# MUST be the first Streamlit command in the script
 st.set_page_config(page_title="Top 6 RAG Architectures", page_icon="🤖", layout="wide")
 
 import tempfile
@@ -17,166 +16,281 @@ from architectures.corrective_rag import CorrectiveRAGPipeline
 from architectures.multimodal_rag import MultimodalRAGPipeline
 from architectures.multilingual_rag import MultilingualRAGPipeline
 
-# Initialize pipelines in session state so they persist across reruns
-if "hybrid_pipeline" not in st.session_state:
-    st.session_state.hybrid_pipeline = HybridRAGPipeline()
-if "graph_pipeline" not in st.session_state:
-    st.session_state.graph_pipeline = GraphRAGPipeline()
-if "agentic_pipeline" not in st.session_state:
-    st.session_state.agentic_pipeline = AgenticRAGPipeline()
-if "crag_pipeline" not in st.session_state:
-    st.session_state.crag_pipeline = CorrectiveRAGPipeline()
-if "multimodal_pipeline" not in st.session_state:
-    st.session_state.multimodal_pipeline = MultimodalRAGPipeline()
+# ── Architecture metadata ────────────────────────────────────────────────────
+
+ARCH_INFO = {
+    "01 Hybrid RAG (Dense + Sparse)": {
+        "icon": "🔀",
+        "tagline": "Dense vector search + BM25 keyword search fused via Reciprocal Rank Fusion",
+        "how": (
+            "Runs **two retrievers in parallel**: ChromaDB (semantic) and BM25 (keyword). "
+            "Their ranked lists are merged with RRF — documents that rank highly in *both* "
+            "methods get a boosted score and rise to the top."
+        ),
+        "best_for": "General-purpose documents — best accuracy across mixed query types",
+        "state_key": "hybrid_pipeline",
+        "label": "Hybrid RAG (Dense + Sparse Fusion)",
+    },
+    "02 Graph RAG (Knowledge Graphs)": {
+        "icon": "🕸️",
+        "tagline": "LLM-extracted entity/relationship graph + vector fallback",
+        "how": (
+            "Uses Gemini to extract **(entity → relationship → entity)** triples from every chunk "
+            "and builds a NetworkX knowledge graph. At query time it walks the graph for matching "
+            "entities, collects relationship context, then combines it with dense vector results."
+        ),
+        "best_for": "Documents rich in named entities and relationships (research papers, reports)",
+        "state_key": "graph_pipeline",
+        "label": "Graph RAG (Entities + Knowledge Graph)",
+    },
+    "03 Agentic RAG (LangGraph)": {
+        "icon": "🤖",
+        "tagline": "LangGraph planner routes queries to vector search, web search, or direct answer",
+        "how": (
+            "A **3-node LangGraph state machine**: Planner → Tool Executor → Reasoner. "
+            "The Planner decides whether to use `VECTOR_SEARCH` (internal docs), `WEB_SEARCH` "
+            "(DuckDuckGo), or answer directly. The Reasoner synthesises the final answer."
+        ),
+        "best_for": "Queries that may need web context or multi-step reasoning",
+        "state_key": "agentic_pipeline",
+        "label": "Agentic RAG (Planner → Tools → Reasoner)",
+    },
+    "04 Corrective RAG (CRAG)": {
+        "icon": "✅",
+        "tagline": "Evaluator grades retrieved docs; rewrites query and falls back to web if needed",
+        "how": (
+            "A **5-node LangGraph workflow**: Retrieve → Evaluate → Route → Generate. "
+            "The Evaluator grades retrieved docs as `CORRECT`, `AMBIGUOUS`, or `INCORRECT`. "
+            "`AMBIGUOUS` triggers query rewriting; `INCORRECT` triggers a full web search fallback."
+        ),
+        "best_for": "When retrieval quality is uncertain or documents may not cover the query",
+        "state_key": "crag_pipeline",
+        "label": "Corrective RAG (Retrieve → Evaluate → Correct)",
+    },
+    "05 Multimodal RAG (Vision + Text)": {
+        "icon": "🖼️",
+        "tagline": "Stores images in metadata; sends text + image to Gemini vision for answers",
+        "how": (
+            "When an image is uploaded, Gemini generates a text summary for embedding. "
+            "The original base64 image is stored in ChromaDB metadata. At query time, retrieved "
+            "chunks that have an attached image include both text and the raw image in the "
+            "multimodal Gemini message."
+        ),
+        "best_for": "Documents with figures, charts, screenshots, or mixed image/text content",
+        "state_key": "multimodal_pipeline",
+        "label": "Multimodal RAG (Vision + Text)",
+    },
+    "06 Multilingual RAG (BGE-M3)": {
+        "icon": "🌍",
+        "tagline": "Cross-lingual embedding space — query in any language, retrieve from any language",
+        "how": (
+            "Uses a multilingual sentence-transformer model so all languages share the same "
+            "vector space. Retrieval is language-agnostic and the generation prompt instructs "
+            "Gemini to answer in the **same language as the query**."
+        ),
+        "best_for": "Multilingual documents or when users may query in different languages",
+        "state_key": "multilingual_pipeline",
+        "label": "Multilingual RAG (Cross-lingual Retrieval)",
+    },
+}
+
+ARCH_KEYS = list(ARCH_INFO.keys())
+
+# ── Session state initialisation ─────────────────────────────────────────────
+
+if "hybrid_pipeline"      not in st.session_state:
+    st.session_state.hybrid_pipeline      = HybridRAGPipeline()
+if "graph_pipeline"       not in st.session_state:
+    st.session_state.graph_pipeline       = GraphRAGPipeline()
+if "agentic_pipeline"     not in st.session_state:
+    st.session_state.agentic_pipeline     = AgenticRAGPipeline()
+if "crag_pipeline"        not in st.session_state:
+    st.session_state.crag_pipeline        = CorrectiveRAGPipeline()
+if "multimodal_pipeline"  not in st.session_state:
+    st.session_state.multimodal_pipeline  = MultimodalRAGPipeline()
 if "multilingual_pipeline" not in st.session_state:
     st.session_state.multilingual_pipeline = MultilingualRAGPipeline()
+if "messages"             not in st.session_state:
+    st.session_state.messages             = []
+if "ingested_archs"       not in st.session_state:
+    st.session_state.ingested_archs       = set()
 
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 
-st.title("Top RAG Architectures in 2026")
-st.markdown("Select an architecture, upload a document, and test it out!")
-
-# Sidebar for settings
 with st.sidebar:
-    st.header("Settings")
-    selected_arch = st.selectbox(
-        "Choose RAG Architecture:",
-        [
-            "01 Hybrid RAG (Dense + Sparse)",
-            "02 Graph RAG (Knowledge Graphs)",
-            "03 Agentic RAG (LangGraph)",
-            "04 Corrective RAG (CRAG)",
-            "05 Multimodal RAG (Vision + Text)",
-            "06 Multilingual RAG (BGE-M3)"
-        ]
+    st.title("⚙️ Controls")
+
+    selected_arch = st.selectbox("RAG Architecture", ARCH_KEYS)
+    compare_mode  = st.checkbox("🔍 Compare All 6 Architectures")
+
+    st.divider()
+
+    # Document status
+    st.markdown("**Document Status**")
+    for key in ARCH_KEYS:
+        info   = ARCH_INFO[key]
+        loaded = key in st.session_state.ingested_archs
+        dot    = "🟢" if loaded else "⚪"
+        short  = key[:18]
+        st.markdown(f"{dot} {short}")
+
+    st.divider()
+
+    # File upload + ingest
+    uploaded_file = st.file_uploader(
+        "Upload Document",
+        type=["pdf", "txt", "docx", "png", "jpg", "jpeg"],
+        help="PDF, TXT, DOCX, or image (PNG/JPG)",
     )
 
-    st.divider()
-
-    compare_mode = st.checkbox("🔍 Compare All Architectures")
-
-    st.divider()
-
-    uploaded_file = st.file_uploader("Upload a Document (PDF/Images)", type=["pdf", "png", "jpg", "jpeg", "txt", "docx"])
-
-    if st.button("Ingest Document") and uploaded_file:
-        with st.spinner("Processing document..."):
+    if st.button("⬆️ Ingest Document", use_container_width=True, disabled=uploaded_file is None):
+        with st.spinner("Processing…"):
             try:
-                if uploaded_file.name.lower().endswith('.pdf'):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_file_path = tmp_file.name
-                    docs = services.load_pdf(tmp_file_path)
-                    os.remove(tmp_file_path)
-                elif uploaded_file.name.lower().endswith('.txt'):
-                    text = uploaded_file.getvalue().decode("utf-8", errors="replace")
+                name = uploaded_file.name.lower()
+                if name.endswith(".pdf"):
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
+                        f.write(uploaded_file.getvalue())
+                        tmp = f.name
+                    docs = services.load_pdf(tmp)
+                    os.remove(tmp)
+
+                elif name.endswith(".txt"):
+                    text  = uploaded_file.getvalue().decode("utf-8", errors="replace")
                     chunks = services.text_splitter.split_text(text)
-                    docs = [Document(page_content=chunk, metadata={"source": uploaded_file.name, "type": "txt"}) for chunk in chunks]
-                elif uploaded_file.name.lower().endswith('.docx'):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp_file:
-                        tmp_file.write(uploaded_file.getvalue())
-                        tmp_file_path = tmp_file.name
+                    docs  = [Document(page_content=c, metadata={"source": uploaded_file.name, "type": "txt"}) for c in chunks]
+
+                elif name.endswith(".docx"):
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as f:
+                        f.write(uploaded_file.getvalue())
+                        tmp = f.name
                     from docx import Document as DocxDocument
-                    docx = DocxDocument(tmp_file_path)
-                    text = "\n".join([para.text for para in docx.paragraphs if para.text.strip()])
-                    os.remove(tmp_file_path)
+                    docx   = DocxDocument(tmp)
+                    text   = "\n".join(p.text for p in docx.paragraphs if p.text.strip())
+                    os.remove(tmp)
                     chunks = services.text_splitter.split_text(text)
-                    docs = [Document(page_content=chunk, metadata={"source": uploaded_file.name, "type": "docx"}) for chunk in chunks]
+                    docs   = [Document(page_content=c, metadata={"source": uploaded_file.name, "type": "docx"}) for c in chunks]
+
                 else:
-                    # Handle image uploads (PNG, JPG, JPEG)
-                    b64_img = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
-                    msg = HumanMessage(content=[
-                        {"type": "text", "text": "Describe this image in detail. What is it about?"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_img}"}}
+                    b64  = base64.b64encode(uploaded_file.getvalue()).decode("utf-8")
+                    msg  = HumanMessage(content=[
+                        {"type": "text", "text": "Describe this image in detail."},
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
                     ])
                     summary = services.extract_response_text(services.llm.invoke([msg]))
                     docs = [Document(
                         page_content=f"Image Description: {summary}",
-                        metadata={"source": uploaded_file.name, "type": "image", "image_base64": b64_img}
+                        metadata={"source": uploaded_file.name, "type": "image", "image_base64": b64},
                     )]
 
                 if not docs:
-                    st.error("Could not extract any content from the document.")
+                    st.error("No content could be extracted.")
                 else:
-                    # Ingest into selected or all architectures
-                    arch_map = {
-                        "01 Hybrid RAG": ("hybrid_pipeline", "Hybrid RAG"),
-                        "02 Graph RAG": ("graph_pipeline", "Graph RAG"),
-                        "03 Agentic RAG": ("agentic_pipeline", "Agentic RAG"),
-                        "04 Corrective RAG": ("crag_pipeline", "Corrective RAG"),
-                        "05 Multimodal RAG": ("multimodal_pipeline", "Multimodal RAG"),
-                        "06 Multilingual RAG": ("multilingual_pipeline", "Multilingual RAG"),
-                    }
+                    targets = ARCH_KEYS if compare_mode else [selected_arch]
+                    for arch_key in targets:
+                        sk = ARCH_INFO[arch_key]["state_key"]
+                        st.session_state[sk].ingest(docs)
+                        st.session_state.ingested_archs.add(arch_key)
 
-                    if compare_mode:
-                        # Ingest into ALL architectures when compare mode is on
-                        for key, (state_key, name) in arch_map.items():
-                            st.session_state[state_key].ingest(docs)
-                        st.success(f"Ingested {len(docs)} chunks into all 6 architectures!")
-                    else:
-                        for key, (state_key, name) in arch_map.items():
-                            if key in selected_arch:
-                                st.session_state[state_key].ingest(docs)
-                                st.success(f"{name}: Ingested {len(docs)} chunks successfully!")
-                                break
+                    scope = "all 6 architectures" if compare_mode else ARCH_INFO[selected_arch]["label"]
+                    st.success(f"✅ {len(docs)} chunks → {scope}")
 
             except Exception as e:
-                st.error(f"Ingestion failed: {str(e)}")
+                st.error(f"Ingestion failed: {e}")
 
-# Chat interface
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.divider()
 
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🗑️ Clear Chat", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
+    with col2:
+        if st.button("🔄 Reset Docs", use_container_width=True):
+            for key in ARCH_KEYS:
+                sk = ARCH_INFO[key]["state_key"]
+                st.session_state[sk].reset()
+            st.session_state.ingested_archs = set()
+            st.success("All document collections cleared.")
+            st.rerun()
+
+# ── Main area ─────────────────────────────────────────────────────────────────
+
+st.title("Top 6 RAG Architectures in 2026")
+
+# Architecture info card
+info = ARCH_INFO[selected_arch]
+with st.expander(f"{info['icon']} **{selected_arch}** — {info['tagline']}", expanded=False):
+    col_a, col_b = st.columns([3, 1])
+    with col_a:
+        st.markdown("**How it works**")
+        st.markdown(info["how"])
+    with col_b:
+        st.markdown("**Best for**")
+        st.info(info["best_for"])
+
+st.divider()
+
+# Chat history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-if prompt := st.chat_input("Ask a question..."):
+# Chat input
+if prompt := st.chat_input("Ask a question about your document…"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user", avatar="🧑"):
         st.markdown(prompt)
 
     with st.chat_message("assistant", avatar="🤖"):
         if compare_mode:
-            st.markdown("### 🔍 RAG Architecture Comparison")
-            pipelines = {
-                "01 Hybrid RAG": st.session_state.hybrid_pipeline,
-                "02 Graph RAG": st.session_state.graph_pipeline,
-                "03 Agentic RAG": st.session_state.agentic_pipeline,
-                "04 Corrective RAG": st.session_state.crag_pipeline,
-                "05 Multimodal RAG": st.session_state.multimodal_pipeline,
-                "06 Multilingual RAG": st.session_state.multilingual_pipeline,
-            }
-            for name, pipeline in pipelines.items():
-                with st.expander(f"**{name}**", expanded=False):
-                    start_time = time.time()
-                    try:
-                        ans = pipeline.query(prompt)
-                    except Exception as e:
-                        ans = f"Error: {str(e)}"
-                    elapsed = time.time() - start_time
-                    st.markdown(f"*{elapsed:.2f} seconds*")
-                    st.markdown(ans)
-            response = "Comparison complete. Expand the tabs above to see each RAG's output!"
-        else:
-            with st.spinner(f"Running {selected_arch}..."):
+            st.markdown("### 🔍 Comparing All 6 Architectures")
+
+            timings = {}
+            answers = {}
+
+            # Run all pipelines
+            for arch_key in ARCH_KEYS:
+                sk       = ARCH_INFO[arch_key]["state_key"]
+                pipeline = st.session_state[sk]
+                t0       = time.time()
                 try:
-                    arch_to_pipeline = {
-                        "01 Hybrid RAG": ("hybrid_pipeline", "Hybrid RAG (Dense + Sparse Fusion)"),
-                        "02 Graph RAG": ("graph_pipeline", "Graph RAG (Entities + Vectors)"),
-                        "03 Agentic RAG": ("agentic_pipeline", "Agentic RAG (LangGraph Planner -> Tools -> Reasoner)"),
-                        "04 Corrective RAG": ("crag_pipeline", "Corrective RAG (Retrieve -> Evaluate -> Rewrite/Fallback)"),
-                        "05 Multimodal RAG": ("multimodal_pipeline", "Multimodal RAG (Vision + Text)"),
-                        "06 Multilingual RAG": ("multilingual_pipeline", "Multilingual RAG (BGE-M3 Cross-lingual)"),
-                    }
-                    response = "Unknown architecture selected."
-                    for key, (state_key, label) in arch_to_pipeline.items():
-                        if key in selected_arch:
-                            answer = st.session_state[state_key].query(prompt)
-                            st.markdown(f"**[{label}]**\n\n{answer}")
-                            response = answer
-                            break
+                    answers[arch_key]  = pipeline.query(prompt)
                 except Exception as e:
-                    response = f"Error running pipeline: {str(e)}"
+                    answers[arch_key]  = f"⚠️ Error: {e}"
+                timings[arch_key] = time.time() - t0
+
+            # Timing summary table
+            timing_rows = "| Architecture | Time |\n|---|---|\n"
+            for k in ARCH_KEYS:
+                timing_rows += f"| {ARCH_INFO[k]['icon']} {k} | `{timings[k]:.2f}s` |\n"
+            st.markdown(timing_rows)
+
+            st.divider()
+
+            # Individual results
+            for arch_key in ARCH_KEYS:
+                icon  = ARCH_INFO[arch_key]["icon"]
+                label = ARCH_INFO[arch_key]["label"]
+                with st.expander(f"{icon} **{arch_key}** — `{timings[arch_key]:.2f}s`", expanded=False):
+                    st.markdown(answers[arch_key])
+
+            response = "Comparison complete — expand each tab above to read the answers."
+
+        else:
+            with st.spinner(f"Running {info['icon']} {selected_arch}…"):
+                try:
+                    sk       = info["state_key"]
+                    pipeline = st.session_state[sk]
+                    t0       = time.time()
+                    answer   = pipeline.query(prompt)
+                    elapsed  = time.time() - t0
+
+                    st.caption(f"{info['icon']} **{info['label']}** · `{elapsed:.2f}s`")
+                    st.markdown(answer)
+                    response = answer
+
+                except Exception as e:
+                    response = f"⚠️ Pipeline error: {e}"
                     st.error(response)
 
     st.session_state.messages.append({"role": "assistant", "content": response})

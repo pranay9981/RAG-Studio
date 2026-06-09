@@ -12,6 +12,16 @@ class HybridRAGPipeline:
         self.chunks: List[Document] = []
         self.chunk_ids: List[str] = []
 
+    def reset(self):
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self.bm25 = None
+        self.chunks = []
+        self.chunk_ids = []
+
     def ingest(self, documents: List[Document]):
         if not documents:
             return

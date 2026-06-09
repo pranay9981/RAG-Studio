@@ -11,6 +11,13 @@ class MultimodalRAGPipeline:
         self.collection_name = "multimodal_rag_collection"
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
+    def reset(self):
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+
     def ingest(self, documents: List[Document]):
         """Ingests chunks into ChromaDB. Supports text and base64 images in metadata."""
         if not documents:

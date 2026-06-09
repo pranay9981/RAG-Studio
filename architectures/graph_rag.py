@@ -41,6 +41,14 @@ Text:
             print(f"Entity extraction error: {e}")
             return []
 
+    def reset(self):
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self.graph.clear()
+
     def ingest(self, documents: List[Document]):
         if not documents:
             return

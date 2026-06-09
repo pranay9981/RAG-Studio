@@ -1,11 +1,10 @@
-from typing import List, Dict, Any, Annotated, TypedDict
-import operator
+from typing import List, Dict, TypedDict
 import uuid
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
 from duckduckgo_search import DDGS
 from core.shared_services import services
+
 
 class CRAGState(TypedDict):
     query: str
@@ -13,116 +12,95 @@ class CRAGState(TypedDict):
     evaluation: str
     rewritten_query: str
 
+
 class CorrectiveRAGPipeline:
     def __init__(self):
         self.collection_name = "crag_collection"
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph = self._build_graph()
 
-    def ingest(self, documents: List[Document]):
-        """Ingests chunks into ChromaDB for CRAG retrieval."""
-        if not documents:
-            return
-
-        # Clear stale data from any previous ingest
+    def reset(self):
         try:
             services.chroma_client.delete_collection(self.collection_name)
         except Exception:
             pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
+    def ingest(self, documents: List[Document]):
+        if not documents:
+            return
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         texts = [doc.page_content for doc in documents]
-        ids = [f"crag_chunk_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
+        ids = [f"crag_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
+        self.collection.add(documents=texts, embeddings=embeddings, ids=ids)
 
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            ids=ids,
-        )
-
-    # --- Graph Nodes ---
     def retrieve_node(self, state: CRAGState) -> Dict:
-        """Retrieves initial documents from Vector DB."""
         query = state["query"]
         if not self.collection.count():
-            return {"documents": ["No documents ingested yet."]}
-            
-        query_embedding = services.embeddings.embed_query(query)
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=3
-        )
-        if not results['documents'][0]:
             return {"documents": []}
-            
-        return {"documents": results['documents'][0]}
+        query_embedding = services.embeddings.embed_query(query)
+        n = min(3, self.collection.count())
+        results = self.collection.query(query_embeddings=[query_embedding], n_results=n)
+        return {"documents": results["documents"][0] if results["documents"][0] else []}
 
     def evaluate_node(self, state: CRAGState) -> Dict:
-        """Evaluates if the retrieved documents are relevant to the query."""
         query = state["query"]
         docs = "\n".join(state["documents"])
-        
-        prompt = f"""You are a Relevance Evaluator. 
-        Analyze if the following documents contain sufficient information to answer the user query.
-        
-        Documents: {docs}
-        Query: {query}
-        
-        Output exactly one of the following words: CORRECT, AMBIGUOUS, INCORRECT"""
-        
+        if not docs.strip():
+            return {"evaluation": "INCORRECT"}
+
+        prompt = f"""You are a Relevance Evaluator.
+Does the following context contain sufficient information to answer the query?
+
+Context: {docs}
+Query: {query}
+
+Output exactly one word: CORRECT, AMBIGUOUS, or INCORRECT"""
+
         response = services.llm.invoke(prompt)
-        eval_result = services.extract_response_text(response).strip().upper()
-        if "CORRECT" in eval_result and "INCORRECT" not in eval_result:
+        result = services.extract_response_text(response).strip().upper()
+        if "CORRECT" in result and "INCORRECT" not in result:
             evaluation = "CORRECT"
-        elif "AMBIGUOUS" in eval_result:
+        elif "AMBIGUOUS" in result:
             evaluation = "AMBIGUOUS"
         else:
             evaluation = "INCORRECT"
-            
         return {"evaluation": evaluation}
 
     def rewrite_node(self, state: CRAGState) -> Dict:
-        """Rewrites the query if evaluation is AMBIGUOUS."""
-        query = state["query"]
-        prompt = f"""Rewrite the following user query to make it clearer and better suited for a web search engine.
-        Query: {query}
-        Output ONLY the rewritten query."""
-        
+        prompt = f"""Rewrite this query to be clearer and better suited for a web search.
+Query: {state['query']}
+Output ONLY the rewritten query."""
         response = services.llm.invoke(prompt)
-        rewritten = services.extract_response_text(response).strip()
-        return {"rewritten_query": rewritten}
+        return {"rewritten_query": services.extract_response_text(response).strip()}
 
     def web_search_node(self, state: CRAGState) -> Dict:
-        """Performs a web search fallback."""
-        query = state.get("rewritten_query", state["query"])
+        query = state.get("rewritten_query") or state["query"]
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=3))
                 search_texts = [f"{r['title']}: {r['body']}" for r in results]
-                # Combine original valid docs with web search docs
                 return {"documents": state["documents"] + search_texts}
         except Exception:
             return {"documents": state["documents"]}
 
     def generate_node(self, state: CRAGState) -> Dict:
-        """Generates the final answer."""
-        query = state["query"]
         docs = "\n\n".join(state["documents"])
-        
         prompt = f"""Answer the user's query using the following context.
-        
-        Context:
-        {docs}
-        
-        Query: {query}
-        Answer:"""
-        
-        response = services.llm.invoke(prompt)
-        text = services.extract_response_text(response)
-        return {"documents": [text]} # We piggyback the answer in the documents field to extract easily
 
-    # --- Routing logic ---
+Context:
+{docs}
+
+Query: {state['query']}
+Answer:"""
+        response = services.llm.invoke(prompt)
+        return {"documents": [services.extract_response_text(response)]}
+
     def route_evaluation(self, state: CRAGState) -> str:
         if state["evaluation"] == "CORRECT":
             return "generate_node"
@@ -133,56 +111,52 @@ class CorrectiveRAGPipeline:
 
     def _build_graph(self):
         workflow = StateGraph(CRAGState)
-        
         workflow.add_node("retrieve_node", self.retrieve_node)
         workflow.add_node("evaluate_node", self.evaluate_node)
         workflow.add_node("rewrite_node", self.rewrite_node)
         workflow.add_node("web_search_node", self.web_search_node)
         workflow.add_node("generate_node", self.generate_node)
-        
         workflow.set_entry_point("retrieve_node")
         workflow.add_edge("retrieve_node", "evaluate_node")
-        
         workflow.add_conditional_edges(
             "evaluate_node",
             self.route_evaluation,
-            {
-                "generate_node": "generate_node",
-                "rewrite_node": "rewrite_node",
-                "web_search_node": "web_search_node"
-            }
+            {"generate_node": "generate_node", "rewrite_node": "rewrite_node", "web_search_node": "web_search_node"},
         )
-        
         workflow.add_edge("rewrite_node", "web_search_node")
         workflow.add_edge("web_search_node", "generate_node")
         workflow.add_edge("generate_node", END)
-        
         return workflow.compile()
 
     def query(self, query: str) -> str:
-        """Runs the CRAG pipeline."""
         initial_state = {"query": query, "documents": [], "evaluation": "", "rewritten_query": ""}
-        
         trace = []
         final_answer = ""
-        
+
+        _EVAL_ICON = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
+
         try:
             for s in self.graph.stream(initial_state, {"recursion_limit": 10}):
                 for node_name, node_state in s.items():
                     if node_name == "evaluate_node":
-                        trace.append(f"[Evaluator] Judged retrieved docs as: {node_state['evaluation']}")
+                        ev = node_state.get("evaluation", "")
+                        icon = _EVAL_ICON.get(ev, "❓")
+                        trace.append(f"**Evaluator** {icon} ->Retrieved docs judged as `{ev}`")
                     elif node_name == "rewrite_node":
-                        trace.append(f"[Rewriter] Rewrote query to: {node_state['rewritten_query']}")
+                        rq = node_state.get("rewritten_query", "")
+                        trace.append(f"**Query Rewriter** ->`{rq}`")
                     elif node_name == "web_search_node":
-                        trace.append(f"[Web Search] Fetched external knowledge.")
+                        trace.append("**Web Search** ->Fetched external knowledge")
                     elif node_name == "generate_node":
                         docs = node_state.get("documents", [])
                         if docs:
                             final_answer = docs[0]
 
-            trace_str = "\n> ".join(trace) if trace else "No trace available."
             if not final_answer:
                 final_answer = "Could not generate an answer. Please ingest a document first."
-            return f"### CRAG Execution Trace:\n> {trace_str}\n\n### Final Answer:\n{final_answer}"
+
+            trace_str = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(trace))
+            return f"**CRAG Trace:**\n{trace_str}\n\n---\n\n{final_answer}"
+
         except Exception as e:
             return f"CRAG pipeline failed: {str(e)}"
