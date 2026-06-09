@@ -77,4 +77,8 @@ WhatsApp*
 # ============================================================
 *.log
 *.tmp
+*.tmp.*
 *.bak
+
+# PyVis generated assets (written next to HTML output)
+lib/
