@@ -15,19 +15,30 @@ class MultimodalRAGPipeline:
         """Ingests chunks into ChromaDB. Supports text and base64 images in metadata."""
         if not documents:
             return
-            
+
+        # Clear stale data from any previous ingest
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+
         texts = [doc.page_content for doc in documents]
         ids = [f"multi_mod_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
-        metadatas = [doc.metadata for doc in documents]
-        
-        # We embed the text (or image summary)
+
+        # ChromaDB metadata values must be str/int/float/bool — filter out anything else
+        metadatas = []
+        for doc in documents:
+            safe_meta = {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool))}
+            metadatas.append(safe_meta)
+
         embeddings = services.embeddings.embed_documents(texts)
-            
+
         self.collection.add(
             documents=texts,
             embeddings=embeddings,
             metadatas=metadatas,
-            ids=ids
+            ids=ids,
         )
 
     def query(self, query: str) -> str:

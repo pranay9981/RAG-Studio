@@ -1,42 +1,80 @@
-# Environment
-.env
-venv/
+# ============================================================
+# Python
+# ============================================================
 __pycache__/
-*.pyc
-*.pyo
-frontend/node_modules/
-frontend/.next/
-frontend/out/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
 
-# Data
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# ============================================================
+# Environment & Secrets — NEVER commit these
+# ============================================================
+.env
+.env.local
+.env.*.local
+*.env
+
+# ============================================================
+# Runtime Data — generated at runtime, not source code
+# ============================================================
+# ChromaDB vector store (auto-created on first ingest)
+data/chroma_db/
+data/chroma_db_test/
+
+# Uploaded and processed documents
 data/uploads/
 data/processed/
 data/graphs/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-Thumbs.db
-.DS_Store
-
-# ChromaDB
-chroma_data/
-
-# Misc
-*.egg-info/
-dist/
-build/
-
-# Tests
+# ============================================================
+# Testing
+# ============================================================
 .pytest_cache/
 .coverage
 htmlcov/
 pytest_db.sqlite
+coverage.xml
 
-# Next.js environment
-frontend/.env.local
-frontend/.env.*.local
+# ============================================================
+# IDEs & Editors
+# ============================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================
+# OS Artifacts
+# ============================================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+# Screenshots / personal files accidentally dropped in root
+WhatsApp*
+*.lnk
+
+# ============================================================
+# Jupyter
+# ============================================================
+.ipynb_checkpoints/
+*.ipynb
+
+# ============================================================
+# Misc
+# ============================================================
+*.log
+*.tmp
+*.bak

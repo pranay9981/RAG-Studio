@@ -24,15 +24,22 @@ class AgenticRAGPipeline:
         """Ingests chunks into ChromaDB for the Vector Search Tool."""
         if not documents:
             return
-            
+
+        # Clear stale data from any previous ingest
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+
         texts = [doc.page_content for doc in documents]
         ids = [f"agentic_chunk_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-        
+
         self.collection.add(
             documents=texts,
             embeddings=embeddings,
-            ids=ids
+            ids=ids,
         )
 
     # --- Tool Definitions ---

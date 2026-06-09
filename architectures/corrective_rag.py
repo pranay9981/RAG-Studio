@@ -23,15 +23,22 @@ class CorrectiveRAGPipeline:
         """Ingests chunks into ChromaDB for CRAG retrieval."""
         if not documents:
             return
-            
+
+        # Clear stale data from any previous ingest
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+
         texts = [doc.page_content for doc in documents]
         ids = [f"crag_chunk_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-        
+
         self.collection.add(
             documents=texts,
             embeddings=embeddings,
-            ids=ids
+            ids=ids,
         )
 
     # --- Graph Nodes ---
@@ -169,9 +176,13 @@ class CorrectiveRAGPipeline:
                     elif node_name == "web_search_node":
                         trace.append(f"[Web Search] Fetched external knowledge.")
                     elif node_name == "generate_node":
-                        final_answer = node_state["documents"][0]
-            
-            trace_str = "\n> ".join(trace)
+                        docs = node_state.get("documents", [])
+                        if docs:
+                            final_answer = docs[0]
+
+            trace_str = "\n> ".join(trace) if trace else "No trace available."
+            if not final_answer:
+                final_answer = "Could not generate an answer. Please ingest a document first."
             return f"### CRAG Execution Trace:\n> {trace_str}\n\n### Final Answer:\n{final_answer}"
         except Exception as e:
-            return f"CRAG loop failed: {str(e)}"
+            return f"CRAG pipeline failed: {str(e)}"
