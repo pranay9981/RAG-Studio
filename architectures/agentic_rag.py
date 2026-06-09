@@ -16,6 +16,7 @@ class AgentState(TypedDict):
 
 class AgenticRAGPipeline:
     def __init__(self):
+        self._on_step = None
         self.collection_name = "agentic_rag_collection"
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph = self._build_graph()
@@ -82,15 +83,21 @@ Output ONLY the option name, nothing else."""
             plan = "WEB_SEARCH"
         else:
             plan = "ANSWER"
+        if self._on_step:
+            self._on_step(("step", f"Planner → {plan}"))
         return {"plan": plan, "messages": [AIMessage(content=f"__plan__{plan}")]}
 
     def tool_executor_node(self, state: AgentState) -> Dict:
         query = state["messages"][0].content
         plan = state["plan"]
         if plan == "VECTOR_SEARCH":
+            if self._on_step:
+                self._on_step(("step", "Vector Search — querying ingested document…"))
             result = self._vector_search(query)
             tool_msg = f"__tool__vector\n{result}"
         else:
+            if self._on_step:
+                self._on_step(("step", "Web Search — fetching external knowledge…"))
             result = self._web_search(query)
             tool_msg = f"__tool__web\n{result}"
         return {"messages": [AIMessage(content=tool_msg)]}
@@ -113,8 +120,13 @@ Context:
 User Query: {query}
 
 Answer directly and comprehensively:"""
-        response = services.llm.invoke(prompt)
-        return {"messages": [AIMessage(content=services.extract_response_text(response))]}
+        if self._on_step:
+            self._on_step(("step", "Reasoner — generating final answer…"))
+        def tok(t):
+            if self._on_step:
+                self._on_step(("token", t))
+        text = services.stream_llm(prompt, on_token=tok)
+        return {"messages": [AIMessage(content=text)]}
 
     def should_continue(self, state: AgentState) -> str:
         if state["plan"] == "ANSWER":
@@ -136,7 +148,8 @@ Answer directly and comprehensively:"""
         workflow.add_edge("reasoner_node", END)
         return workflow.compile()
 
-    def query(self, query: str) -> str:
+    def query(self, query: str, on_step=None) -> str:
+        self._on_step = on_step
         initial_state = {"messages": [HumanMessage(content=query)], "plan": "", "is_sufficient": False}
         trace_steps = []
         final_answer = ""
@@ -169,8 +182,13 @@ Answer directly and comprehensively:"""
             if not final_answer:
                 final_answer = "Could not generate an answer. Please ingest a document first."
 
+            if on_step:
+                return final_answer
+
             trace_str = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(trace_steps))
             return f"**Agent Trace:**\n{trace_str}\n\n---\n\n{final_answer}"
 
         except Exception as e:
             return f"Agent pipeline failed: {str(e)}"
+        finally:
+            self._on_step = None

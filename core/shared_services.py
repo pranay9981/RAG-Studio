@@ -48,6 +48,17 @@ class SharedServices:
         documents = [Document(page_content=chunk, metadata={"source": file_path, "type": "pdf"}) for chunk in chunks]
         return documents
 
+    def stream_llm(self, prompt: str, on_token=None) -> str:
+        """Streams an LLM call token-by-token. Calls on_token(str) for each chunk. Returns full text."""
+        full_text = ""
+        for chunk in self.llm.stream(prompt):
+            token = self.extract_response_text(chunk)
+            if token:
+                if on_token:
+                    on_token(token)
+                full_text += token
+        return full_text
+
     def extract_response_text(self, response: Any) -> str:
         """Reliably extracts text from LangChain's AIMessage content."""
         content = response.content

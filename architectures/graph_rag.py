@@ -86,12 +86,19 @@ Query: {query}"""
         text = services.extract_response_text(response)
         return [e.strip() for e in text.split(",") if e.strip()]
 
-    def query(self, query: str) -> str:
+    def query(self, query: str, on_step=None) -> str:
+        def step(msg):
+            if on_step:
+                on_step(("step", msg))
+
         if not self.collection.count():
             return "Please ingest a document first!"
 
         # 1. Retrieve relevant subgraph via entity matching
+        step("Extracting query entities…")
         query_entities = self._extract_query_entities(query)
+
+        step("Searching knowledge graph for matching nodes…")
         subgraph_lines = []
         for entity in query_entities:
             for node in self.graph.nodes():
@@ -102,6 +109,7 @@ Query: {query}"""
         graph_text = "\n".join(set(subgraph_lines))
 
         # 2. Dense retrieval as semantic fallback
+        step("Dense retrieval from ChromaDB (fallback)…")
         query_embedding = services.embeddings.embed_query(query)
         n = min(3, self.collection.count())
         dense_response = self.collection.query(query_embeddings=[query_embedding], n_results=n)
@@ -120,5 +128,5 @@ Query: {query}
 
 Answer:"""
 
-        response = services.llm.invoke(prompt)
-        return services.extract_response_text(response)
+        step("Generating answer with Gemini…")
+        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))

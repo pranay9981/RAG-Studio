@@ -39,32 +39,36 @@ class MultilingualRAGPipeline:
             ids=ids,
         )
 
-    def query(self, query: str) -> str:
+    def query(self, query: str, on_step=None) -> str:
         """Retrieves using multilingual search and generates an answer."""
+        def step(msg):
+            if on_step:
+                on_step(("step", msg))
+
         if not self.collection.count():
             return "No documents ingested yet."
-            
-        # Embed query using the multilingual model
+
+        step("Embedding query with multilingual model…")
         query_embedding = services.multilingual_embeddings.embed_query(query)
-        
-        # Retrieve top 4
+
+        step("Cross-lingual retrieval from ChromaDB…")
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=4
         )
-        
+
         docs = results['documents'][0]
         context = "\n\n".join(docs)
-        
-        prompt = f"""You are a helpful Multilingual Assistant. 
+
+        prompt = f"""You are a helpful Multilingual Assistant.
         Answer the user's query in the same language as the query, using ONLY the following context.
         If the context does not contain the answer, say "I cannot answer this based on the provided documents."
-        
+
         Context:
         {context}
-        
+
         Query: {query}
         Answer:"""
-        
-        response = services.llm.invoke(prompt)
-        return services.extract_response_text(response)
+
+        step("Generating answer in query language…")
+        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))

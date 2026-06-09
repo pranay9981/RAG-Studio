@@ -69,12 +69,17 @@ class HybridRAGPipeline:
         reranked = sorted(fused_scores.values(), key=lambda x: x["score"], reverse=True)
         return [item["doc"] for item in reranked]
 
-    def query(self, query: str, top_k: int = 5) -> str:
+    def query(self, query: str, top_k: int = 5, on_step=None) -> str:
+        def step(msg):
+            if on_step: on_step(("step", msg))
+
         if not self.bm25 or not self.chunks:
             return "Please ingest a document first!"
 
-        # 1. Dense retrieval via ChromaDB
+        step("Embedding query with sentence-transformers…")
         query_embedding = services.embeddings.embed_query(query)
+
+        step(f"Dense retrieval from ChromaDB (top {top_k})…")
         n = min(top_k, self.collection.count())
         dense_response = self.collection.query(query_embeddings=[query_embedding], n_results=n)
         dense_results = [
@@ -82,7 +87,7 @@ class HybridRAGPipeline:
             for i in range(len(dense_response["ids"][0]))
         ]
 
-        # 2. Sparse retrieval via BM25 — uses the same chunk IDs as ChromaDB
+        step(f"Sparse retrieval via BM25 (top {top_k})…")
         tokenized_query = query.lower().split()
         bm25_scores = self.bm25.get_scores(tokenized_query)
         top_sparse_indices = bm25_scores.argsort()[-top_k:][::-1]
@@ -91,11 +96,11 @@ class HybridRAGPipeline:
             for idx in top_sparse_indices
         ]
 
-        # 3. Fuse with Reciprocal Rank Fusion
+        step("Applying Reciprocal Rank Fusion (RRF k=60)…")
         fused = self._reciprocal_rank_fusion(dense_results, sparse_results, k=60)
         context = "\n\n".join(doc["text"] for doc in fused[:top_k])
 
-        # 4. Generate answer
+        step("Generating answer with Gemini…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
 
 Context:
@@ -104,6 +109,4 @@ Context:
 Query: {query}
 
 Answer:"""
-
-        response = services.llm.invoke(prompt)
-        return services.extract_response_text(response)
+        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))

@@ -248,16 +248,18 @@ if prompt := st.chat_input("Ask a question about your document…"):
             timings = {}
             answers = {}
 
-            # Run all pipelines
             for arch_key in ARCH_KEYS:
-                sk       = ARCH_INFO[arch_key]["state_key"]
-                pipeline = st.session_state[sk]
-                t0       = time.time()
-                try:
-                    answers[arch_key]  = pipeline.query(prompt)
-                except Exception as e:
-                    answers[arch_key]  = f"⚠️ Error: {e}"
-                timings[arch_key] = time.time() - t0
+                icon_a = ARCH_INFO[arch_key]["icon"]
+                sk     = ARCH_INFO[arch_key]["state_key"]
+                with st.status(f"{icon_a} {arch_key}…", expanded=False) as s:
+                    t0 = time.time()
+                    try:
+                        answers[arch_key] = st.session_state[sk].query(prompt)
+                    except Exception as e:
+                        answers[arch_key] = f"⚠️ Error: {e}"
+                    elapsed_i = time.time() - t0
+                    timings[arch_key] = elapsed_i
+                    s.update(label=f"{icon_a} {arch_key} — {elapsed_i:.2f}s", state="complete")
 
             # Timing summary table
             timing_rows = "| Architecture | Time |\n|---|---|\n"
@@ -269,28 +271,41 @@ if prompt := st.chat_input("Ask a question about your document…"):
 
             # Individual results
             for arch_key in ARCH_KEYS:
-                icon  = ARCH_INFO[arch_key]["icon"]
-                label = ARCH_INFO[arch_key]["label"]
-                with st.expander(f"{icon} **{arch_key}** — `{timings[arch_key]:.2f}s`", expanded=False):
+                icon_a = ARCH_INFO[arch_key]["icon"]
+                with st.expander(f"{icon_a} **{arch_key}** — `{timings[arch_key]:.2f}s`", expanded=False):
                     st.markdown(answers[arch_key])
 
             response = "Comparison complete — expand each tab above to read the answers."
 
         else:
-            with st.spinner(f"Running {info['icon']} {selected_arch}…"):
+            collected_tokens = []
+            answer = ""
+            elapsed = 0.0
+
+            with st.status(f"🧠 {info['icon']} {selected_arch}…", expanded=True) as status:
+                def on_event(event):
+                    kind, content = event
+                    if kind == "step":
+                        st.write(f"✅ {content}")
+                    elif kind == "token":
+                        collected_tokens.append(content)
+
+                t0 = time.time()
                 try:
                     sk       = info["state_key"]
                     pipeline = st.session_state[sk]
-                    t0       = time.time()
-                    answer   = pipeline.query(prompt)
+                    answer   = pipeline.query(prompt, on_step=on_event)
                     elapsed  = time.time() - t0
-
-                    st.caption(f"{info['icon']} **{info['label']}** · `{elapsed:.2f}s`")
-                    st.markdown(answer)
-                    response = answer
-
+                    status.update(label=f"✅ Done in {elapsed:.2f}s", state="complete", expanded=False)
                 except Exception as e:
-                    response = f"⚠️ Pipeline error: {e}"
-                    st.error(response)
+                    elapsed = time.time() - t0
+                    answer  = f"⚠️ Pipeline error: {e}"
+                    status.update(label="❌ Error", state="error", expanded=False)
+                    st.error(answer)
+
+            final_text = "".join(collected_tokens) if collected_tokens else answer
+            st.caption(f"{info['icon']} **{info['label']}** · `{elapsed:.2f}s`")
+            st.markdown(final_text)
+            response = final_text
 
     st.session_state.messages.append({"role": "assistant", "content": response})

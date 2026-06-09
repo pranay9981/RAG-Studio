@@ -48,35 +48,48 @@ class MultimodalRAGPipeline:
             ids=ids,
         )
 
-    def query(self, query: str) -> str:
+    def query(self, query: str, on_step=None) -> str:
         """Retrieves text and images, and sends them to Gemini for a multimodal answer."""
+        def step(msg):
+            if on_step:
+                on_step(("step", msg))
+
         if not self.collection.count():
             return "No documents ingested yet."
-            
+
+        step("Embedding query…")
         query_embedding = services.embeddings.embed_query(query)
-        
+
+        step("Retrieving documents and images from ChromaDB…")
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=3
         )
-        
+
         docs = results['documents'][0]
         metadatas = results['metadatas'][0]
-        
+
+        step("Building multimodal message (text + images)…")
         content = [
             {"type": "text", "text": f"Answer the user query using the following retrieved context. Query: {query}\n\nContext:"}
         ]
-        
+
         for idx, (doc_text, meta) in enumerate(zip(docs, metadatas)):
             content.append({"type": "text", "text": f"--- Document {idx+1} ---\n{doc_text}\n"})
-            # If there's an image attached to this chunk, send it to the LLM!
             if meta and "image_base64" in meta:
                 content.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{meta['image_base64']}"}
                 })
-                
+
         message = HumanMessage(content=content)
-        
-        response = services.llm.invoke([message])
-        return services.extract_response_text(response)
+
+        step("Generating answer with Gemini Vision…")
+        full_text = ""
+        for chunk in services.llm.stream([message]):
+            token = services.extract_response_text(chunk)
+            if token:
+                if on_step:
+                    on_step(("token", token))
+                full_text += token
+        return full_text

@@ -15,6 +15,7 @@ class CRAGState(TypedDict):
 
 class CorrectiveRAGPipeline:
     def __init__(self):
+        self._on_step = None
         self.collection_name = "crag_collection"
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph = self._build_graph()
@@ -70,9 +71,13 @@ Output exactly one word: CORRECT, AMBIGUOUS, or INCORRECT"""
             evaluation = "AMBIGUOUS"
         else:
             evaluation = "INCORRECT"
+        if self._on_step:
+            self._on_step(("step", f"Evaluator: docs judged as {evaluation}"))
         return {"evaluation": evaluation}
 
     def rewrite_node(self, state: CRAGState) -> Dict:
+        if self._on_step:
+            self._on_step(("step", "Rewriting query for better web search…"))
         prompt = f"""Rewrite this query to be clearer and better suited for a web search.
 Query: {state['query']}
 Output ONLY the rewritten query."""
@@ -80,6 +85,8 @@ Output ONLY the rewritten query."""
         return {"rewritten_query": services.extract_response_text(response).strip()}
 
     def web_search_node(self, state: CRAGState) -> Dict:
+        if self._on_step:
+            self._on_step(("step", "Web search fallback — fetching external knowledge…"))
         query = state.get("rewritten_query") or state["query"]
         try:
             with DDGS() as ddgs:
@@ -90,6 +97,8 @@ Output ONLY the rewritten query."""
             return {"documents": state["documents"]}
 
     def generate_node(self, state: CRAGState) -> Dict:
+        if self._on_step:
+            self._on_step(("step", "Generating answer with Gemini…"))
         docs = "\n\n".join(state["documents"])
         prompt = f"""Answer the user's query using the following context.
 
@@ -98,8 +107,11 @@ Context:
 
 Query: {state['query']}
 Answer:"""
-        response = services.llm.invoke(prompt)
-        return {"documents": [services.extract_response_text(response)]}
+        def tok(t):
+            if self._on_step:
+                self._on_step(("token", t))
+        text = services.stream_llm(prompt, on_token=tok)
+        return {"documents": [text]}
 
     def route_evaluation(self, state: CRAGState) -> str:
         if state["evaluation"] == "CORRECT":
@@ -128,7 +140,8 @@ Answer:"""
         workflow.add_edge("generate_node", END)
         return workflow.compile()
 
-    def query(self, query: str) -> str:
+    def query(self, query: str, on_step=None) -> str:
+        self._on_step = on_step
         initial_state = {"query": query, "documents": [], "evaluation": "", "rewritten_query": ""}
         trace = []
         final_answer = ""
@@ -155,8 +168,13 @@ Answer:"""
             if not final_answer:
                 final_answer = "Could not generate an answer. Please ingest a document first."
 
+            if on_step:
+                return final_answer
+
             trace_str = "\n".join(f"{i + 1}. {step}" for i, step in enumerate(trace))
             return f"**CRAG Trace:**\n{trace_str}\n\n---\n\n{final_answer}"
 
         except Exception as e:
             return f"CRAG pipeline failed: {str(e)}"
+        finally:
+            self._on_step = None
