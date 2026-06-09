@@ -1,0 +1,57 @@
+import os
+import uuid
+from typing import List, Dict, Any
+from langchain_core.documents import Document
+from core.shared_services import services
+
+class MultilingualRAGPipeline:
+    def __init__(self):
+        self.collection_name = "multilingual_rag_collection"
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+
+    def ingest(self, documents: List[Document]):
+        """Ingests chunks into ChromaDB using multilingual embeddings."""
+        if not documents:
+            return
+            
+        texts = [doc.page_content for doc in documents]
+        ids = [f"multi_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
+        
+        # Use the specialized multilingual embedding model
+        embeddings = services.multilingual_embeddings.embed_documents(texts)
+            
+        self.collection.add(
+            documents=texts,
+            embeddings=embeddings,
+            ids=ids
+        )
+
+    def query(self, query: str) -> str:
+        """Retrieves using multilingual search and generates an answer."""
+        if not self.collection.count():
+            return "No documents ingested yet."
+            
+        # Embed query using the multilingual model
+        query_embedding = services.multilingual_embeddings.embed_query(query)
+        
+        # Retrieve top 4
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=4
+        )
+        
+        docs = results['documents'][0]
+        context = "\n\n".join(docs)
+        
+        prompt = f"""You are a helpful Multilingual Assistant. 
+        Answer the user's query in the same language as the query, using ONLY the following context.
+        If the context does not contain the answer, say "I cannot answer this based on the provided documents."
+        
+        Context:
+        {context}
+        
+        Query: {query}
+        Answer:"""
+        
+        response = services.llm.invoke(prompt)
+        return services.extract_response_text(response)

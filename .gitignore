@@ -1,0 +1,42 @@
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Data
+data/uploads/
+data/processed/
+data/graphs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# ChromaDB
+chroma_data/
+
+# Misc
+*.egg-info/
+dist/
+build/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+pytest_db.sqlite
+
+# Next.js environment
+frontend/.env.local
+frontend/.env.*.local
