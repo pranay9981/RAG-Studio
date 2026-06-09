@@ -6,6 +6,7 @@ import tempfile
 import os
 import base64
 import time
+import streamlit.components.v1 as components
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from core.shared_services import services
@@ -227,6 +228,20 @@ with st.expander(f"{info['icon']} **{selected_arch}** — {info['tagline']}", ex
     with col_b:
         st.markdown("**Best for**")
         st.info(info["best_for"])
+
+# Knowledge graph visualization (Graph RAG only, after ingest)
+if selected_arch == "02 Graph RAG (Knowledge Graphs)" and selected_arch in st.session_state.ingested_archs:
+    graph_pipeline = st.session_state.graph_pipeline
+    node_count = graph_pipeline.graph.number_of_nodes()
+    edge_count = graph_pipeline.graph.number_of_edges()
+    with st.expander(f"🕸️ Knowledge Graph — {node_count} entities · {edge_count} relationships", expanded=True):
+        if node_count == 0:
+            st.info("No entities extracted yet. Try ingesting a document with rich named entities.")
+        else:
+            html = graph_pipeline.render_graph_html()
+            if html:
+                components.html(html, height=540, scrolling=False)
+                st.caption("Drag nodes to rearrange · Scroll to zoom · Hover for relationship labels")
 
 st.divider()
 

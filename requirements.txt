@@ -27,6 +27,7 @@ Pillow>=10.0
 
 # Graph RAG
 networkx>=3.0
+pyvis>=0.3.2
 
 # Hybrid RAG
 rank-bm25>=0.2.2

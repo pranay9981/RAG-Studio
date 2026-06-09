@@ -86,6 +86,60 @@ Query: {query}"""
         text = services.extract_response_text(response)
         return [e.strip() for e in text.split(",") if e.strip()]
 
+    def render_graph_html(self, max_nodes: int = 80) -> str:
+        """Returns a PyVis interactive graph as an HTML string. Empty string if no graph."""
+        from pyvis.network import Network
+        import tempfile, os
+
+        if not self.graph.nodes():
+            return ""
+
+        net = Network(
+            height="520px", width="100%",
+            bgcolor="#0e1117", font_color="white",
+            directed=True,
+            notebook=False,
+        )
+        net.set_options("""
+        {
+          "physics": {
+            "forceAtlas2Based": {
+              "gravitationalConstant": -50,
+              "springLength": 120
+            },
+            "solver": "forceAtlas2Based",
+            "stabilization": { "iterations": 100 }
+          },
+          "edges": {
+            "color": { "color": "#4a9eff" },
+            "smooth": { "type": "curvedCW", "roundness": 0.15 }
+          }
+        }
+        """)
+
+        # Pick top-N nodes by degree so huge graphs don't crash the browser
+        sorted_nodes = sorted(self.graph.nodes(), key=lambda n: self.graph.degree(n), reverse=True)
+        nodes_to_show = set(sorted_nodes[:max_nodes])
+
+        for node in nodes_to_show:
+            degree = self.graph.degree(node)
+            size = max(12, min(40, 12 + degree * 4))
+            color = "#4a9eff" if degree > 2 else "#a0c4ff"
+            net.add_node(str(node), label=str(node), title=f"{node}\n{degree} connection(s)", size=size, color=color)
+
+        for u, v, data in self.graph.edges(data=True):
+            if u in nodes_to_show and v in nodes_to_show:
+                rel = data.get("relationship", "")
+                net.add_edge(str(u), str(v), label=rel, title=rel, arrows="to")
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".html", delete=False, encoding="utf-8") as f:
+            net.write_html(f.name, notebook=False)
+            tmp = f.name
+        with open(tmp, "r", encoding="utf-8") as f:
+            html = f.read()
+        os.unlink(tmp)
+        return html
+
     def query(self, query: str, on_step=None) -> str:
         def step(msg):
             if on_step:
