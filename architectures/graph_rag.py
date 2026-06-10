@@ -5,11 +5,24 @@ from typing import List, Dict
 from langchain_core.documents import Document
 from core.shared_services import services
 
+
 class GraphRAGPipeline:
     def __init__(self):
         self.graph = nx.Graph()
         self.collection_name = "graph_rag_collection"
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+
+    def reset(self):
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self.graph.clear()
 
     def _extract_entities_and_relationships(self, text: str) -> List[Dict]:
         prompt = f"""Extract key entities and relationships from the following text.
@@ -22,53 +35,32 @@ Text:
         try:
             response = services.llm.invoke(prompt)
             content = services.extract_response_text(response).strip()
-
-            # Strip markdown code fences if present
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
             elif "```" in content:
                 content = content.split("```")[1].split("```")[0].strip()
-
-            # Find the JSON array bounds robustly
             start = content.find("[")
             end = content.rfind("]") + 1
             if start != -1 and end > start:
                 content = content[start:end]
-
             triples = json.loads(content)
             return triples if isinstance(triples, list) else []
         except Exception as e:
             print(f"Entity extraction error: {e}")
             return []
 
-    def reset(self):
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-        self.graph.clear()
-
     def ingest(self, documents: List[Document]):
         if not documents:
             return
 
-        # Clear stale data from any previous ingest
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-        self.graph.clear()
-
+        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"graph_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
+        ids = [f"graph_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
         metadatas = [doc.metadata for doc in documents]
-
         embeddings = services.embeddings.embed_documents(texts)
+
         self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
-        # Build knowledge graph from entity/relationship triples
         for doc in documents:
             triples = self._extract_entities_and_relationships(doc.page_content)
             for triple in triples:
@@ -87,9 +79,9 @@ Query: {query}"""
         return [e.strip() for e in text.split(",") if e.strip()]
 
     def render_graph_html(self, max_nodes: int = 80) -> str:
-        """Returns a PyVis interactive graph as an HTML string. Empty string if no graph."""
         from pyvis.network import Network
-        import tempfile, os
+        import tempfile
+        import os
 
         if not self.graph.nodes():
             return ""
@@ -117,7 +109,6 @@ Query: {query}"""
         }
         """)
 
-        # Pick top-N nodes by degree so huge graphs don't crash the browser
         sorted_nodes = sorted(self.graph.nodes(), key=lambda n: self.graph.degree(n), reverse=True)
         nodes_to_show = set(sorted_nodes[:max_nodes])
 
@@ -148,7 +139,6 @@ Query: {query}"""
         if not self.collection.count():
             return "Please ingest a document first!"
 
-        # 1. Retrieve relevant subgraph via entity matching
         step("Extracting query entities…")
         query_entities = self._extract_query_entities(query)
 
@@ -162,14 +152,25 @@ Query: {query}"""
                         subgraph_lines.append(f"{node} --[{rel}]--> {neighbor}")
         graph_text = "\n".join(set(subgraph_lines))
 
-        # 2. Dense retrieval as semantic fallback
         step("Dense retrieval from ChromaDB (fallback)…")
         query_embedding = services.embeddings.embed_query(query)
-        n = min(3, self.collection.count())
-        dense_response = self.collection.query(query_embeddings=[query_embedding], n_results=n)
-        vector_text = "\n\n".join(dense_response["documents"][0]) if dense_response["documents"][0] else ""
+        n = min(4, self.collection.count())
+        dense_response = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n,
+            include=["documents", "metadatas"],
+        )
+        dense_docs = dense_response["documents"][0] if dense_response["documents"][0] else []
+        dense_metas = dense_response["metadatas"][0] if dense_response["metadatas"] else [{}] * len(dense_docs)
+        vector_text = "\n\n".join(dense_docs)
 
-        # 3. Synthesize answer from both sources
+        if on_step and dense_docs:
+            sources = [
+                {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
+                for text, meta in zip(dense_docs, dense_metas)
+            ]
+            on_step(("sources", sources))
+
         prompt = f"""You are GraphRAG. Answer the user's query using the Knowledge Graph relationships and semantic text below.
 
 Knowledge Graph Subgraph:

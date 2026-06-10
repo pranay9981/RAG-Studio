@@ -18,6 +18,10 @@ class AgenticRAGPipeline:
     def __init__(self):
         self._on_step = None
         self.collection_name = "agentic_rag_collection"
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph = self._build_graph()
 
@@ -31,25 +35,30 @@ class AgenticRAGPipeline:
     def ingest(self, documents: List[Document]):
         if not documents:
             return
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"agentic_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
+        ids = [f"agentic_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        metadatas = [doc.metadata for doc in documents]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, ids=ids)
+        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
-    def _vector_search(self, query: str) -> str:
+    def _vector_search(self, query: str) -> tuple:
         if not self.collection.count():
-            return "No documents have been ingested yet."
+            return "No documents have been ingested yet.", []
         query_embedding = services.embeddings.embed_query(query)
-        n = min(3, self.collection.count())
-        results = self.collection.query(query_embeddings=[query_embedding], n_results=n)
-        if not results["documents"][0]:
-            return "No relevant documents found."
-        return "\n\n".join(results["documents"][0])
+        n = min(4, self.collection.count())
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n,
+            include=["documents", "metadatas"],
+        )
+        docs = results["documents"][0] if results["documents"][0] else []
+        metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
+        sources = [
+            {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
+            for text, meta in zip(docs, metas)
+        ]
+        return "\n\n".join(docs) if docs else "No relevant documents found.", sources
 
     def _web_search(self, query: str) -> str:
         try:
@@ -93,7 +102,9 @@ Output ONLY the option name, nothing else."""
         if plan == "VECTOR_SEARCH":
             if self._on_step:
                 self._on_step(("step", "Vector Search — querying ingested document…"))
-            result = self._vector_search(query)
+            result, sources = self._vector_search(query)
+            if self._on_step and sources:
+                self._on_step(("sources", sources))
             tool_msg = f"__tool__vector\n{result}"
         else:
             if self._on_step:
@@ -104,7 +115,6 @@ Output ONLY the option name, nothing else."""
 
     def reasoner_node(self, state: AgentState) -> Dict:
         query = state["messages"][0].content
-        # Collect only tool output messages (strip internal markers)
         context_parts = []
         for m in state["messages"]:
             if m.content.startswith("__tool__"):
@@ -122,9 +132,11 @@ User Query: {query}
 Answer directly and comprehensively:"""
         if self._on_step:
             self._on_step(("step", "Reasoner — generating final answer…"))
+
         def tok(t):
             if self._on_step:
                 self._on_step(("token", t))
+
         text = services.stream_llm(prompt, on_token=tok)
         return {"messages": [AIMessage(content=text)]}
 

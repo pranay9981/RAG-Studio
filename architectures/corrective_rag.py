@@ -17,7 +17,12 @@ class CorrectiveRAGPipeline:
     def __init__(self):
         self._on_step = None
         self.collection_name = "crag_collection"
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self._doc_sources: List[str] = []
         self.graph = self._build_graph()
 
     def reset(self):
@@ -26,28 +31,39 @@ class CorrectiveRAGPipeline:
         except Exception:
             pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self._doc_sources = []
 
     def ingest(self, documents: List[Document]):
         if not documents:
             return
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"crag_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
+        ids = [f"crag_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        metadatas = [doc.metadata for doc in documents]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, ids=ids)
+        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        self._doc_sources.extend([doc.metadata.get("source", "Unknown") for doc in documents])
 
     def retrieve_node(self, state: CRAGState) -> Dict:
         query = state["query"]
         if not self.collection.count():
             return {"documents": []}
         query_embedding = services.embeddings.embed_query(query)
-        n = min(3, self.collection.count())
-        results = self.collection.query(query_embeddings=[query_embedding], n_results=n)
-        return {"documents": results["documents"][0] if results["documents"][0] else []}
+        n = min(4, self.collection.count())
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n,
+            include=["documents", "metadatas"],
+        )
+        docs = results["documents"][0] if results["documents"][0] else []
+        metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
+        if self._on_step and docs:
+            sources = [
+                {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
+                for text, meta in zip(docs, metas)
+            ]
+            self._on_step(("sources", sources))
+        return {"documents": docs}
 
     def evaluate_node(self, state: CRAGState) -> Dict:
         query = state["query"]
@@ -107,9 +123,11 @@ Context:
 
 Query: {state['query']}
 Answer:"""
+
         def tok(t):
             if self._on_step:
                 self._on_step(("token", t))
+
         text = services.stream_llm(prompt, on_token=tok)
         return {"documents": [text]}
 

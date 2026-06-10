@@ -1,14 +1,17 @@
-import os
 import uuid
-import base64
-from typing import List, Dict, Any
+from typing import List
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from core.shared_services import services
 
+
 class MultimodalRAGPipeline:
     def __init__(self):
         self.collection_name = "multimodal_rag_collection"
+        try:
+            services.chroma_client.delete_collection(self.collection_name)
+        except Exception:
+            pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def reset(self):
@@ -19,21 +22,13 @@ class MultimodalRAGPipeline:
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def ingest(self, documents: List[Document]):
-        """Ingests chunks into ChromaDB. Supports text and base64 images in metadata."""
         if not documents:
             return
 
-        # Clear stale data from any previous ingest
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-
+        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"multi_mod_{uuid.uuid4().hex[:8]}_{i}" for i in range(len(documents))]
+        ids = [f"multi_mod_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
 
-        # ChromaDB metadata values must be str/int/float/bool — filter out anything else
         metadatas = []
         for doc in documents:
             safe_meta = {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool))}
@@ -49,7 +44,6 @@ class MultimodalRAGPipeline:
         )
 
     def query(self, query: str, on_step=None) -> str:
-        """Retrieves text and images, and sends them to Gemini for a multimodal answer."""
         def step(msg):
             if on_step:
                 on_step(("step", msg))
@@ -63,11 +57,19 @@ class MultimodalRAGPipeline:
         step("Retrieving documents and images from ChromaDB…")
         results = self.collection.query(
             query_embeddings=[query_embedding],
-            n_results=3
+            n_results=3,
+            include=["documents", "metadatas"],
         )
 
-        docs = results['documents'][0]
-        metadatas = results['metadatas'][0]
+        docs = results["documents"][0]
+        metadatas = results["metadatas"][0]
+
+        if on_step and docs:
+            sources = [
+                {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
+                for text, meta in zip(docs, metadatas)
+            ]
+            on_step(("sources", sources))
 
         step("Building multimodal message (text + images)…")
         content = [
@@ -75,7 +77,7 @@ class MultimodalRAGPipeline:
         ]
 
         for idx, (doc_text, meta) in enumerate(zip(docs, metadatas)):
-            content.append({"type": "text", "text": f"--- Document {idx+1} ---\n{doc_text}\n"})
+            content.append({"type": "text", "text": f"--- Document {idx + 1} ---\n{doc_text}\n"})
             if meta and "image_base64" in meta:
                 content.append({
                     "type": "image_url",

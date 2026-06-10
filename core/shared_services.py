@@ -48,6 +48,21 @@ class SharedServices:
         documents = [Document(page_content=chunk, metadata={"source": file_path, "type": "pdf"}) for chunk in chunks]
         return documents
 
+    def rerank(self, query: str, texts: list, top_n: int = 5) -> list:
+        """Cross-encoder re-ranking. Returns (score, text) pairs sorted by score desc."""
+        if not hasattr(self, '_cross_encoder') or self._cross_encoder is None:
+            from sentence_transformers import CrossEncoder
+            self._cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)
+        pairs = [[query, t] for t in texts]
+        import numpy as np
+        scores = self._cross_encoder.predict(pairs)
+        if not hasattr(scores, 'tolist'):
+            scores = list(scores)
+        else:
+            scores = scores.tolist()
+        scored = sorted(zip(scores, texts), key=lambda x: x[0], reverse=True)
+        return scored[:top_n]
+
     def stream_llm(self, prompt: str, on_token=None) -> str:
         """Streams an LLM call token-by-token. Calls on_token(str) for each chunk. Returns full text."""
         full_text = ""
