@@ -135,13 +135,14 @@ Original query: {query}
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(
-            doc.get("window_text") or doc["text"] for doc in top_docs[:top_k]
-        )
+        fused_texts = [d["text"] for d in top_docs[:top_k]]
+        fused_metas = [{"source": d.get("source", "Unknown"), "parent_text": d.get("window_text")} for d in top_docs[:top_k]]
+        context = services.build_sourced_context(fused_texts, fused_metas)
 
         step("Generating final answer with Gemini…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
 The context was retrieved using multiple query variations to maximise coverage.
+When the query asks to compare documents, use the [Source: ...] labels to distinguish between them.
 
 Context:
 {context}

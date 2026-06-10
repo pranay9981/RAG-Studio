@@ -8,6 +8,7 @@ from architectures.multimodal_rag import MultimodalRAGPipeline
 from architectures.multilingual_rag import MultilingualRAGPipeline
 from architectures.rag_fusion import RAGFusionPipeline
 from architectures.hyde_rag import HyDERAGPipeline
+from architectures.structured_rag import StructuredRAGPipeline
 
 ARCH_KEYS: List[str] = [
     "01 Hybrid RAG (Dense + Sparse)",
@@ -18,6 +19,7 @@ ARCH_KEYS: List[str] = [
     "06 Multilingual RAG (BGE-M3)",
     "07 RAG-Fusion (Query Expansion)",
     "08 HyDE RAG (Hypothetical Document)",
+    "09 Structured RAG (CSV/Excel)",
 ]
 
 STATE_KEY_MAP: Dict[str, str] = {
@@ -29,6 +31,7 @@ STATE_KEY_MAP: Dict[str, str] = {
     "06 Multilingual RAG (BGE-M3)":          "multilingual_pipeline",
     "07 RAG-Fusion (Query Expansion)":       "rag_fusion_pipeline",
     "08 HyDE RAG (Hypothetical Document)":   "hyde_pipeline",
+    "09 Structured RAG (CSV/Excel)":         "structured_pipeline",
 }
 
 ARCH_INFO: Dict[str, Dict] = {
@@ -96,6 +99,14 @@ ARCH_INFO: Dict[str, Dict] = {
         "best_for": "Short or keyword-style queries worded very differently from the source text",
         "state_key": "hyde_pipeline",
     },
+    "09 Structured RAG (CSV/Excel)": {
+        "key": "09 Structured RAG (CSV/Excel)",
+        "icon": "📊", "label": "Structured RAG (Text-to-Pandas + Vector)",
+        "tagline": "Converts natural language queries into pandas operations on tabular data",
+        "how": "When CSV or Excel files are ingested, Gemini generates pandas code from the natural language query and executes it directly on the DataFrame. Falls back to vector search for narrative questions. Both results are combined for the final answer.",
+        "best_for": "Spreadsheets, CSV datasets, numerical analysis, filtering, aggregation, and statistics",
+        "state_key": "structured_pipeline",
+    },
 }
 
 
@@ -110,6 +121,7 @@ class GlobalSession:
             "multilingual_pipeline": MultilingualRAGPipeline(),
             "rag_fusion_pipeline":   RAGFusionPipeline(),
             "hyde_pipeline":         HyDERAGPipeline(),
+            "structured_pipeline":   StructuredRAGPipeline(),
         }
         self.history: List[Dict] = []
         self.ingested_archs: Set[str] = set()

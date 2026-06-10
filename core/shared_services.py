@@ -59,11 +59,35 @@ class SharedServices:
             result.append(Document(page_content=doc.page_content, metadata=new_meta))
         return result
 
+    def create_parent_child_documents(self, documents: List[Document]) -> List[Document]:
+        """Creates small child chunks (300 chars) for retrieval with the full parent (1000 chars) in metadata.
+        Children are embedded for precise matching; parent text is used at generation time."""
+        result = []
+        for doc in documents:
+            children = self.child_text_splitter.split_text(doc.page_content)
+            parent_text = doc.page_content[:4000]
+            for child_text in children:
+                new_meta = {**doc.metadata, "parent_text": parent_text}
+                result.append(Document(page_content=child_text, metadata=new_meta))
+        return result
+
     def get_context_text(self, doc_text: str, meta: Optional[dict]) -> str:
-        """Returns window_text from metadata when available, otherwise the raw chunk."""
+        """Returns the richest available context: parent_text > window_text > raw chunk."""
+        if meta and "parent_text" in meta:
+            return meta["parent_text"]
         if meta and "window_text" in meta:
             return meta["window_text"]
         return doc_text
+
+    def build_sourced_context(self, texts: list, metas: list) -> str:
+        """Builds context string with [Source: filename] labels so the LLM can compare documents."""
+        parts = []
+        for text, meta in zip(texts, metas):
+            source = (meta or {}).get("source", "Unknown")
+            label = source.split("/")[-1].split("\\")[-1]
+            content = self.get_context_text(text, meta)
+            parts.append(f"[Source: {label}]\n{content}")
+        return "\n\n---\n\n".join(parts)
 
     # ── LLM helpers ───────────────────────────────────────────────────────────
 

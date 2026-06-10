@@ -17,14 +17,21 @@ export default function DocumentManager({ archKeys, onIngested }: Props) {
   // Always ingest into all 8 architectures so switching modes never requires re-upload
   const targets = archKeys
 
-  const handleFile = async (file: File) => {
+  const handleFiles = async (files: File[]) => {
+    if (!files.length) return
     setLoading(true); setMsg('')
-    try {
-      const res = await ingestFile(file, targets)
-      setMsg(`✓ ${res.chunks} chunks ingested`)
-      onIngested(res.source, res.chunks)
-    } catch (e: any) { setMsg(`✗ ${e.message}`) }
-    finally { setLoading(false) }
+    let totalChunks = 0; let errors = 0
+    for (const file of files) {
+      try {
+        const res = await ingestFile(file, targets)
+        totalChunks += res.chunks
+        onIngested(res.source, res.chunks)
+      } catch { errors++ }
+    }
+    setMsg(errors === 0
+      ? `✓ ${files.length} file${files.length > 1 ? 's' : ''} → ${totalChunks} chunks ingested`
+      : `✓ ${files.length - errors} ingested, ${errors} failed`)
+    setLoading(false)
   }
 
   const handleUrl = async () => {
@@ -46,14 +53,14 @@ export default function DocumentManager({ archKeys, onIngested }: Props) {
       <div
         onClick={() => fileRef.current?.click()}
         onDragOver={e => e.preventDefault()}
-        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+        onDrop={e => { e.preventDefault(); const files = Array.from(e.dataTransfer.files); if (files.length) handleFiles(files) }}
         className="border border-dashed border-white/[0.1] rounded-lg p-3 text-center cursor-pointer hover:border-indigo-500/40 hover:bg-indigo-500/5 transition-colors"
       >
         <Upload size={14} className="mx-auto mb-1 text-slate-500" />
-        <p className="text-[11px] text-slate-500">Drop file or click</p>
-        <p className="text-[10px] text-slate-600 mt-0.5">PDF · TXT · DOCX · PNG · JPG</p>
+        <p className="text-[11px] text-slate-500">Drop files or click · multiple OK</p>
+        <p className="text-[10px] text-slate-600 mt-0.5">PDF · TXT · DOCX · CSV · XLSX · PNG · JPG</p>
       </div>
-      <input ref={fileRef} type="file" accept=".pdf,.txt,.docx,.png,.jpg,.jpeg" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+      <input ref={fileRef} type="file" multiple accept=".pdf,.txt,.docx,.csv,.xlsx,.xls,.png,.jpg,.jpeg" className="hidden" onChange={e => { const files = Array.from(e.target.files ?? []); if (files.length) handleFiles(files) }} />
 
       <div className="flex gap-1.5">
         <input

@@ -107,13 +107,11 @@ Passage:"""
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(
-            services.get_context_text(text, meta)
-            for text, meta in zip(docs, metas)
-        )
+        context = services.build_sourced_context(docs, metas)
 
         step("Generating final answer from retrieved real context…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
+When the query asks to compare documents, use the [Source: ...] labels to distinguish between them.
 
 Context:
 {context}

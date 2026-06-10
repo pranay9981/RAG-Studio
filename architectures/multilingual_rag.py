@@ -93,13 +93,12 @@ class MultilingualRAGPipeline:
 
         # Build context using window_text where available
         meta_map = {doc: meta for doc, meta in zip(docs, metas)}
-        context = "\n\n".join(
-            services.get_context_text(t, meta_map.get(t, {}))
-            for t in reranked_texts
-        )
+        reranked_metas = [meta_map.get(t, {}) for t in reranked_texts]
+        context = services.build_sourced_context(reranked_texts, reranked_metas)
 
         prompt = f"""You are a helpful Multilingual Assistant.
 Answer the user's query in the same language as the query, using ONLY the following context.
+When the query asks to compare documents, use the [Source: ...] labels to distinguish between them.
 If the context does not contain the answer, say "I cannot answer this based on the provided documents."
 
 Context:

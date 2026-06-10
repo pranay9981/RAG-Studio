@@ -149,6 +149,45 @@ async def process_file(file: UploadFile) -> List[Document]:
         chunks = services.text_splitter.split_text(text)
         return [Document(page_content=c, metadata={"source": source, "type": "docx"}) for c in chunks]
 
+    if name.endswith(".csv"):
+        import pandas as pd
+        import io as _io
+        df = pd.read_csv(_io.BytesIO(content))
+        schema = (
+            f"Columns: {list(df.columns)}\n"
+            f"Shape: {df.shape[0]} rows × {df.shape[1]} columns\n"
+            f"Dtypes:\n" + "\n".join(f"  {col}: {dtype}" for col, dtype in df.dtypes.items())
+        )
+        preview = df.head(500).to_csv(index=False)
+        text = f"TABLE SCHEMA:\n{schema}\n\nDATA:\n{preview}"
+        return [Document(
+            page_content=text,
+            metadata={
+                "source": source, "type": "csv",
+                "columns": json.dumps(list(df.columns)),
+                "rows": str(df.shape[0]),
+            },
+        )]
+
+    if name.endswith((".xlsx", ".xls")):
+        import pandas as pd
+        import io as _io
+        df = pd.read_excel(_io.BytesIO(content))
+        schema = (
+            f"Columns: {list(df.columns)}\n"
+            f"Shape: {df.shape[0]} rows × {df.shape[1]} columns"
+        )
+        preview = df.head(500).to_csv(index=False)
+        text = f"TABLE SCHEMA:\n{schema}\n\nDATA:\n{preview}"
+        return [Document(
+            page_content=text,
+            metadata={
+                "source": source, "type": "excel",
+                "columns": json.dumps(list(df.columns)),
+                "rows": str(df.shape[0]),
+            },
+        )]
+
     b64 = base64.b64encode(content).decode("utf-8")
     msg = HumanMessage(content=[
         {"type": "text", "text": "Describe this image in detail."},
@@ -222,8 +261,8 @@ async def ingest_document(
     if not docs:
         raise HTTPException(status_code=422, detail="No content could be extracted")
 
-    # Apply windowed chunking so each chunk carries parent context in metadata
-    docs = services.create_windowed_documents(docs, window=1)
+    # Parent-child chunking: small children for retrieval, parent text stored in metadata for generation
+    docs = services.create_parent_child_documents(docs)
 
     ingested: List[str] = []
     for arch_key in target_keys:
@@ -251,7 +290,7 @@ async def load_demo():
         Document(page_content=c, metadata={"source": "RAG System Guide (Demo)", "type": "demo"})
         for c in chunks
     ]
-    docs = services.create_windowed_documents(docs, window=1)
+    docs = services.create_parent_child_documents(docs)
 
     ingested: List[str] = []
     for arch_key in ARCH_KEYS:
@@ -434,35 +473,68 @@ async def compare(request: CompareRequest):
 @app.post("/api/evaluate")
 async def evaluate_answer(request: EvalRequest):
     context = "\n".join(s.get("text", "") for s in request.sources) if request.sources else ""
-    prompt = f"""You are an expert RAG system evaluator. Score the answer on four dimensions.
-
-Question: {request.query}
-Retrieved Context (first 1500 chars): {context[:1500] if context else "N/A"}
-Generated Answer: {request.answer[:800]}
-
-Score each 0-10:
-1. Faithfulness: Is the answer grounded in the context? (0=hallucinated, 10=fully supported)
-2. Relevance: Does the answer directly address the question? (0=off-topic, 10=perfectly on-point)
-3. Context Precision: Were the right chunks retrieved? (0=irrelevant, 10=perfect)
-4. Context Recall: Did the context contain all info needed to fully answer? (0=missing key info, 10=complete)
-
-Output ONLY valid JSON: {{"faithfulness": X, "relevance": X, "context_precision": X, "context_recall": X}}"""
-
     scores = {"faithfulness": 0, "relevance": 0, "context_precision": 0, "context_recall": 0}
     eval_ok = False
+
+    # ── Step 1: RAGAS-style faithfulness — extract claims then verify each ────
+    faithfulness_score = 0
     try:
-        response = services.llm.invoke(prompt)
-        text = services.extract_response_text(response)
+        claims_prompt = f"""Break this answer into individual factual claims. Each claim = one verifiable statement.
+Answer: {request.answer[:600]}
+Output ONLY a JSON array of strings: ["claim1", "claim2", ...]"""
+        claims_resp = services.llm.invoke(claims_prompt)
+        claims_text = services.extract_response_text(claims_resp)
+        cm = re.search(r"\[.*?\]", claims_text, re.DOTALL)
+        claims = json.loads(cm.group()) if cm else []
+
+        if claims and context:
+            verify_prompt = f"""For each claim, output true if it is SUPPORTED by the context, false otherwise.
+Context: {context[:1500]}
+Claims: {json.dumps(claims[:10])}
+Output ONLY a JSON array of booleans (one per claim): [true, false, ...]"""
+            verify_resp = services.llm.invoke(verify_prompt)
+            verify_text = services.extract_response_text(verify_resp)
+            vm = re.search(r"\[.*?\]", verify_text, re.DOTALL)
+            supported = json.loads(vm.group()) if vm else []
+            if supported and claims:
+                faithfulness_score = round(sum(1 for s in supported if s) / len(claims) * 10)
+    except Exception as e:
+        print(f"[evaluate] faithfulness step failed: {e}")
+
+    # ── Step 2: relevance, context_precision, context_recall in one call ─────
+    try:
+        other_prompt = f"""You are an expert RAG evaluator. Score on three dimensions.
+
+Question: {request.query}
+Retrieved Context: {context[:1200] if context else "N/A"}
+Generated Answer: {request.answer[:600]}
+
+Score each 0-10:
+1. Relevance: Does the answer directly address the question? (0=off-topic, 10=perfect)
+2. Context Precision: Were the retrieved chunks relevant to the query? (0=all irrelevant, 10=all relevant)
+3. Context Recall: Did the context contain all information needed to fully answer? (0=missing key info, 10=complete)
+
+Output ONLY valid JSON: {{"relevance": X, "context_precision": X, "context_recall": X}}"""
+
+        resp = services.llm.invoke(other_prompt)
+        text = services.extract_response_text(resp)
         m = re.search(r"\{[^}]+\}", text)
         if m:
             raw = json.loads(m.group())
-            keys = ("faithfulness", "relevance", "context_precision", "context_recall")
-            scores = {k: max(0, min(10, int(raw.get(k, 0)))) for k in keys}
+            scores = {
+                "faithfulness": faithfulness_score,
+                "relevance": max(0, min(10, int(raw.get("relevance", 0)))),
+                "context_precision": max(0, min(10, int(raw.get("context_precision", 0)))),
+                "context_recall": max(0, min(10, int(raw.get("context_recall", 0)))),
+            }
             eval_ok = True
     except Exception as e:
-        print(f"[evaluate] LLM eval parse failed: {e}")
+        print(f"[evaluate] other metrics step failed: {e}")
+        if faithfulness_score:
+            scores["faithfulness"] = faithfulness_score
+            eval_ok = True
 
-    # Only store analytics when the LLM actually returned scores
+    # Only store analytics when at least one LLM step succeeded
     if eval_ok and request.arch_key:
         try:
             adaptive_db.store_eval_analytics(request.arch_key, request.query, scores)

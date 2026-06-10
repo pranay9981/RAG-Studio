@@ -154,12 +154,16 @@ class HybridRAGPipeline:
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(
-            window_map.get(t) or t for t in reranked_texts
-        )
+        meta_list = [
+            {"source": next((c.get("source") for c in candidates if c["text"] == t), "Unknown"),
+             "parent_text": window_map.get(t)}
+            for t in reranked_texts
+        ]
+        context = services.build_sourced_context(reranked_texts, meta_list)
 
         step("Generating answer with Gemini…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
+When the query asks to compare or contrast documents, use the [Source: ...] labels to distinguish between them.
 
 Context:
 {context}

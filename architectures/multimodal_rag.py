@@ -67,7 +67,7 @@ class MultimodalRAGPipeline:
         content = [
             {
                 "type": "text",
-                "text": f"Answer the user query using the following retrieved context. Query: {query}\n\nContext:",
+                "text": f"Answer the user query using the following retrieved context. When comparing documents use [Source:] labels. Query: {query}\n\nContext:",
             }
         ]
 

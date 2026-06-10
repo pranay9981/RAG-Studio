@@ -100,6 +100,7 @@ Output ONLY the rewritten query."""
             self._on_step(("step", "Generating answer with Gemini…"))
         docs = "\n\n".join(state["documents"])
         prompt = f"""Answer the user's query using the following context.
+When the query asks to compare documents, use any [Source: ...] labels present to distinguish between them.
 
 Context:
 {docs}

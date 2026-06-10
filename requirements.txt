@@ -38,5 +38,9 @@ duckduckgo-search>=6.0
 # Multilingual
 langdetect>=1.0
 
+# Structured data
+pandas>=2.0
+openpyxl>=3.0
+
 # Utilities
 numpy>=1.24

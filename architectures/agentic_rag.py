@@ -158,6 +158,7 @@ Output ONLY the option name, nothing else."""
         context = "\n\n".join(context_parts) if context_parts else "No retrieved context available."
 
         prompt = f"""Answer the user's query using the context below.
+When the query asks to compare documents, use any [Source: ...] labels to distinguish between them.
 
 Context:
 {context}

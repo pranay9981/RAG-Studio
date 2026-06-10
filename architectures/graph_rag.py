@@ -195,12 +195,10 @@ Query: {query}"""
             ]
             on_step(("sources", sources))
 
-        vector_text = "\n\n".join(
-            services.get_context_text(text, meta)
-            for text, meta in zip(dense_docs, dense_metas)
-        )
+        vector_text = services.build_sourced_context(dense_docs, dense_metas)
 
         prompt = f"""You are GraphRAG. Answer the user's query using the Knowledge Graph relationships and semantic text below.
+When the query asks to compare documents, use the [Source: ...] labels to distinguish between them.
 
 Knowledge Graph Subgraph:
 {graph_text if graph_text else "No specific relationships found."}
