@@ -3,10 +3,12 @@ from typing import List, Dict
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 
 
 class HybridRAGPipeline:
     def __init__(self):
+        self.arch_key = "01 Hybrid RAG (Dense + Sparse)"
         self.collection_name = "hybrid_rag_collection"
         try:
             services.chroma_client.delete_collection(self.collection_name)
@@ -119,6 +121,10 @@ class HybridRAGPipeline:
 
         # Self-evaluation on re-ranked results
         reranked_texts = [text for _, text in scored]
+
+        # Feedback boost — surface positively-rated chunks, demote negatives
+        dummy_metas = [{} for _ in reranked_texts]
+        reranked_texts, _ = adaptive_db.apply_feedback_boost(reranked_texts, dummy_metas, self.arch_key)
         quality = services.evaluate_context(query, reranked_texts)
         _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
         step(f"Context quality: {_icons.get(quality, '')} {quality}")

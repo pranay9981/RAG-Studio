@@ -2,10 +2,12 @@ import uuid
 from typing import List, Dict
 from langchain_core.documents import Document
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 
 
 class RAGFusionPipeline:
     def __init__(self):
+        self.arch_key = "07 RAG-Fusion (Query Expansion)"
         self.collection_name = "rag_fusion_collection"
         try:
             services.chroma_client.delete_collection(self.collection_name)
@@ -118,6 +120,13 @@ Original query: {query}
             if web:
                 top_texts = top_texts + web
                 top_docs = top_docs + [{"text": t, "source": "web", "window_text": None} for t in web]
+
+        # Feedback boost — reorder top_docs by feedback signal
+        doc_texts = [d["text"] for d in top_docs]
+        dummy_metas = [{} for _ in top_docs]
+        boosted_texts, _ = adaptive_db.apply_feedback_boost(doc_texts, dummy_metas, self.arch_key)
+        text_to_doc = {d["text"]: d for d in top_docs}
+        top_docs = [text_to_doc.get(t, {"text": t, "source": "Unknown", "window_text": None}) for t in boosted_texts]
 
         if on_step and top_docs:
             sources = [

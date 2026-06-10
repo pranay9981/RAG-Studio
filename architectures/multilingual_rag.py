@@ -2,10 +2,12 @@ import uuid
 from typing import List
 from langchain_core.documents import Document
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 
 
 class MultilingualRAGPipeline:
     def __init__(self):
+        self.arch_key = "06 Multilingual RAG (BGE-M3)"
         self.collection_name = "multilingual_rag_collection"
         try:
             services.chroma_client.delete_collection(self.collection_name)
@@ -76,6 +78,10 @@ class MultilingualRAGPipeline:
             if web:
                 reranked_texts = reranked_texts + web
                 metas = metas + [{}] * len(web)
+
+        # Feedback boost — surface positively-rated chunks, demote negatives
+        dummy_metas = [{} for _ in reranked_texts]
+        reranked_texts, _ = adaptive_db.apply_feedback_boost(reranked_texts, dummy_metas, self.arch_key)
 
         src_map = {doc: (meta or {}).get("source", "Unknown") for doc, meta in zip(docs, metas)}
         if on_step:

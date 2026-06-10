@@ -293,7 +293,8 @@ async def query_stream(
 
     if cached:
         async def cached_generator():
-            yield f'data: {json.dumps({"type": "step", "content": f"⚡ Semantic cache hit (similarity {cached[\"similarity\"]}) — reusing previous answer"})}\n\n'
+            sim = cached["similarity"]
+            yield f'data: {json.dumps({"type": "step", "content": f"⚡ Semantic cache hit (similarity {sim}) — reusing previous answer"})}\n\n'
             if cached["sources"]:
                 yield f'data: {json.dumps({"type": "sources", "content": cached["sources"]})}\n\n'
             # Stream cached answer token by token for visual continuity
@@ -374,8 +375,8 @@ async def query_stream(
                                     arch_key, query, query_embedding,
                                     collected_answer, collected_sources[:5],
                                 )
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                print(f"[cache] store_query_cache failed: {e}")
                     break
 
             except Empty:
@@ -447,7 +448,8 @@ Score each 0-10:
 
 Output ONLY valid JSON: {{"faithfulness": X, "relevance": X, "context_precision": X, "context_recall": X}}"""
 
-    scores = {"faithfulness": 5, "relevance": 5, "context_precision": 5, "context_recall": 5}
+    scores = {"faithfulness": 0, "relevance": 0, "context_precision": 0, "context_recall": 0}
+    eval_ok = False
     try:
         response = services.llm.invoke(prompt)
         text = services.extract_response_text(response)
@@ -455,16 +457,17 @@ Output ONLY valid JSON: {{"faithfulness": X, "relevance": X, "context_precision"
         if m:
             raw = json.loads(m.group())
             keys = ("faithfulness", "relevance", "context_precision", "context_recall")
-            scores = {k: max(0, min(10, int(raw.get(k, 5)))) for k in keys}
-    except Exception:
-        pass
+            scores = {k: max(0, min(10, int(raw.get(k, 0)))) for k in keys}
+            eval_ok = True
+    except Exception as e:
+        print(f"[evaluate] LLM eval parse failed: {e}")
 
-    # Store eval analytics if arch_key provided
-    if request.arch_key:
+    # Only store analytics when the LLM actually returned scores
+    if eval_ok and request.arch_key:
         try:
             adaptive_db.store_eval_analytics(request.arch_key, request.query, scores)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[evaluate] store_eval_analytics failed: {e}")
 
     return scores
 

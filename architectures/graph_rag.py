@@ -4,10 +4,12 @@ import uuid
 from typing import List, Dict
 from langchain_core.documents import Document
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 
 
 class GraphRAGPipeline:
     def __init__(self):
+        self.arch_key = "02 Graph RAG (Knowledge Graphs)"
         self.graph = nx.Graph()
         self.collection_name = "graph_rag_collection"
         try:
@@ -182,6 +184,9 @@ Query: {query}"""
             if web:
                 dense_docs = dense_docs + web
                 dense_metas = dense_metas + [{}] * len(web)
+
+        # Feedback boost — surface positively-rated chunks, demote negatives
+        dense_docs, dense_metas = adaptive_db.apply_feedback_boost(dense_docs, dense_metas, self.arch_key)
 
         if on_step and dense_docs:
             sources = [

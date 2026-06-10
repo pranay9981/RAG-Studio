@@ -64,8 +64,8 @@ class AdaptiveDB:
         for (chunk_ids_json,) in rows:
             try:
                 result.extend(json.loads(chunk_ids_json))
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[adaptive_db] chunk_ids parse error: {e}")
         return result
 
     # ── Semantic cache ────────────────────────────────────────────────────────
@@ -105,7 +105,8 @@ class AdaptiveDB:
                         "sources": json.loads(sources_json),
                         "similarity": round(sim, 3),
                     }
-            except Exception:
+            except Exception as e:
+                print(f"[adaptive_db] similarity calc error: {e}")
                 continue
         return None
 
@@ -207,6 +208,48 @@ class AdaptiveDB:
                 "feedback_total": fb["total"],
             }
         return result
+
+    def get_feedback_docs(self, arch_key: str):
+        """Returns (positive_snippets, negative_snippets) as sets of lowercased text prefixes."""
+        rows = self.conn.execute(
+            "SELECT chunk_ids, rating FROM feedback WHERE arch_key = ? ORDER BY ts DESC LIMIT 500",
+            (arch_key,),
+        ).fetchall()
+        positive, negative = set(), set()
+        for (chunk_ids_json, rating) in rows:
+            try:
+                snippets = json.loads(chunk_ids_json)
+                if rating > 0:
+                    positive.update(s.lower() for s in snippets if s)
+                else:
+                    negative.update(s.lower() for s in snippets if s)
+            except Exception as e:
+                print(f"[adaptive_db] feedback_docs parse error: {e}")
+        return positive, negative
+
+    def apply_feedback_boost(self, texts: List[str], metas: List[Any], arch_key: str):
+        """Reorders (texts, metas) so positively-rated chunks surface first, negative last.
+        Matching is done on the first 80 chars of each text against stored feedback snippets."""
+        positive, negative = self.get_feedback_docs(arch_key)
+        if not positive and not negative:
+            return texts, metas
+
+        def score(text: str) -> int:
+            prefix = text[:80].lower()
+            for p in positive:
+                if p and (p in prefix or prefix in p):
+                    return 1
+            for n in negative:
+                if n and (n in prefix or prefix in n):
+                    return -1
+            return 0
+
+        pairs = list(zip(texts, metas))
+        if not pairs:
+            return texts, metas
+        pairs.sort(key=lambda x: score(x[0]), reverse=True)
+        new_texts, new_metas = zip(*pairs)
+        return list(new_texts), list(new_metas)
 
     def get_recent_queries(self, limit: int = 20) -> List[Dict]:
         rows = self.conn.execute(

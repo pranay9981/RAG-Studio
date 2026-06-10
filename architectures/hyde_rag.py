@@ -2,6 +2,7 @@ import uuid
 from typing import List
 from langchain_core.documents import Document
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 
 
 class HyDERAGPipeline:
@@ -13,6 +14,7 @@ class HyDERAGPipeline:
     """
 
     def __init__(self):
+        self.arch_key = "08 HyDE RAG (Hypothetical Document)"
         self.collection_name = "hyde_rag_collection"
         try:
             services.chroma_client.delete_collection(self.collection_name)
@@ -94,6 +96,9 @@ Passage:"""
             if web:
                 docs = docs + web
                 metas = metas + [{}] * len(web)
+
+        # Feedback boost — surface positively-rated chunks, demote negatives
+        docs, metas = adaptive_db.apply_feedback_boost(docs, metas, self.arch_key)
 
         if on_step and docs:
             sources = [

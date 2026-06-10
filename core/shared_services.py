@@ -124,7 +124,8 @@ Output exactly one word: CORRECT, AMBIGUOUS, or INCORRECT"""
             elif "AMBIGUOUS" in text:
                 return "AMBIGUOUS"
             return "INCORRECT"
-        except Exception:
+        except Exception as e:
+            print(f"[evaluate_context] LLM call failed: {e}")
             return "AMBIGUOUS"
 
     # ── Web search fallback ───────────────────────────────────────────────────
@@ -136,7 +137,8 @@ Output exactly one word: CORRECT, AMBIGUOUS, or INCORRECT"""
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=n))
                 return [f"{r['title']}: {r['body']}" for r in results]
-        except Exception:
+        except Exception as e:
+            print(f"[web_search] DuckDuckGo fallback failed: {e}")
             return []
 
 

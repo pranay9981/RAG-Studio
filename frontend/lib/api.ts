@@ -1,6 +1,6 @@
 import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, HistoryItem, AnalyticsData } from './types'
 
-const BASE = 'http://127.0.0.1:8000'
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://127.0.0.1:8000'
 
 export async function getArchitectures(): Promise<ArchInfo[]> {
   const r = await fetch(`${BASE}/api/architectures`)
