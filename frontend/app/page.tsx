@@ -1,19 +1,19 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Loader2 } from 'lucide-react'
+import { Send, Loader2, Network, X } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import ArchCard from '@/components/ArchCard'
 import ChatMessage from '@/components/ChatMessage'
 import BrainWorking from '@/components/BrainWorking'
 import SourcePanel from '@/components/SourcePanel'
-import EvalScorecard from '@/components/EvalScorecard'
-import DocumentManager from '@/components/DocumentManager'
 import CompareGrid from '@/components/CompareGrid'
-import { getArchitectures, streamQuery, compareAll, evaluateAnswer, resetSession } from '@/lib/api'
+import DocumentManager from '@/components/DocumentManager'
+import { getArchitectures, streamQuery, compareAll, evaluateAnswer, resetSession, getGraphHtml } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
 
 const SESSION_ID = 'default'
+const GRAPH_ARCH = '02 Graph RAG (Knowledge Graphs)'
 
 export default function Page() {
   const [archs, setArchs] = useState<ArchInfo[]>([])
@@ -31,6 +31,8 @@ export default function Page() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [compareResults, setCompareResults] = useState<CompareResult[]>([])
   const [compareLoading, setCompareLoading] = useState(false)
+  const [graphHtml, setGraphHtml] = useState('')
+  const [showGraph, setShowGraph] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
@@ -45,6 +47,12 @@ export default function Page() {
 
   const currentArch = archs.find(a => a.key === selectedArch)
 
+  const handleOpenGraph = useCallback(async () => {
+    const html = await getGraphHtml()
+    setGraphHtml(html)
+    setShowGraph(true)
+  }, [])
+
   const handleSend = useCallback(async () => {
     const q = input.trim()
     if (!q || isStreaming) return
@@ -58,8 +66,28 @@ export default function Page() {
       setCompareResults([])
       try {
         const results = await compareAll(q, SESSION_ID)
-        setCompareResults(results)
-        setHistory(prev => [...prev, { query: q, arch: 'Compare All', elapsed: Math.max(...results.map(r => r.elapsed)), answer: '' }])
+
+        if (enableEval) {
+          const withEval = await Promise.all(
+            results.map(async r => {
+              if (r.error || !r.answer) return r
+              try {
+                const evalScore = await evaluateAnswer(q, r.answer, [])
+                return { ...r, eval: evalScore }
+              } catch { return r }
+            })
+          )
+          setCompareResults(withEval)
+        } else {
+          setCompareResults(results)
+        }
+
+        setHistory(prev => [...prev, {
+          query: q,
+          arch: 'Compare All',
+          elapsed: Math.max(...results.map(r => r.elapsed)),
+          answer: '',
+        }])
       } finally { setCompareLoading(false) }
       return
     }
@@ -118,13 +146,18 @@ export default function Page() {
     setDocLibrary([])
     setHistory([])
     setCompareResults([])
+    setGraphHtml('')
   }
 
   const handleExport = () => {
     const md = messages.map(m => `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n${m.content}`).join('\n\n---\n\n')
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
-    a.download = 'rag-chat.md'; a.click()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
+    a.download = 'rag-chat.md'
+    a.click()
   }
+
+  const showGraphBtn = selectedArch === GRAPH_ARCH && ingestedArchs.has(GRAPH_ARCH) && !compareMode
 
   return (
     <div className="flex h-screen bg-base overflow-hidden">
@@ -144,22 +177,30 @@ export default function Page() {
         onExport={handleExport}
       >
         <DocumentManager
-          selectedArch={selectedArch}
-          compareMode={compareMode}
           archKeys={archs.map(a => a.key)}
           onIngested={(source, chunks) => {
             setDocLibrary(prev => [...prev, { name: source, chunks }])
-            const targets = compareMode ? archs.map(a => a.key) : [selectedArch]
-            setIngestedArchs(prev => new Set([...prev, ...targets]))
+            setIngestedArchs(new Set(archs.map(a => a.key)))
           }}
         />
       </Sidebar>
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Arch info card */}
-        {currentArch && !compareMode && <ArchCard arch={currentArch} />}
-
-        {/* Compare header */}
+        {/* Arch info card or compare header */}
+        {currentArch && !compareMode && (
+          <div className="flex items-center justify-between pr-4">
+            <ArchCard arch={currentArch} />
+            {showGraphBtn && (
+              <button
+                onClick={handleOpenGraph}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-colors flex-shrink-0"
+              >
+                <Network size={13} />
+                Knowledge Graph
+              </button>
+            )}
+          </div>
+        )}
         {compareMode && (
           <div className="px-6 py-3 border-b border-white/[0.06] bg-indigo-500/5 flex items-center gap-2">
             <span className="text-xs font-medium text-indigo-300">🔍 Compare Mode — all 8 architectures run simultaneously</span>
@@ -223,6 +264,32 @@ export default function Page() {
           </div>
         </div>
       </div>
+
+      {/* Knowledge Graph Modal */}
+      {showGraph && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm" onClick={() => setShowGraph(false)}>
+          <div
+            className="bg-[#0e0e1a] border border-white/[0.1] rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+            style={{ width: '90vw', height: '85vh' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
+              <div className="flex items-center gap-2">
+                <Network size={15} className="text-indigo-400" />
+                <span className="text-sm font-semibold text-slate-200">Knowledge Graph</span>
+                <span className="text-xs text-slate-500">Graph RAG entity relationships</span>
+              </div>
+              <button onClick={() => setShowGraph(false)} className="text-slate-500 hover:text-slate-300 transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            {graphHtml
+              ? <iframe srcDoc={graphHtml} className="flex-1 w-full border-0" sandbox="allow-scripts allow-same-origin" title="Knowledge Graph" />
+              : <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">No graph data yet — ingest a document first</div>
+            }
+          </div>
+        </div>
+      )}
     </div>
   )
 }

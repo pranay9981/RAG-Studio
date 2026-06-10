@@ -4,19 +4,18 @@ import { Upload, Link, Loader2 } from 'lucide-react'
 import { ingestFile, ingestUrl } from '@/lib/api'
 
 interface Props {
-  selectedArch: string
-  compareMode: boolean
   archKeys: string[]
   onIngested: (source: string, chunks: number) => void
 }
 
-export default function DocumentManager({ selectedArch, compareMode, archKeys, onIngested }: Props) {
+export default function DocumentManager({ archKeys, onIngested }: Props) {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const targets = compareMode ? archKeys : [selectedArch]
+  // Always ingest into all 8 architectures so switching modes never requires re-upload
+  const targets = archKeys
 
   const handleFile = async (file: File) => {
     setLoading(true); setMsg('')

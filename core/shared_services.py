@@ -87,7 +87,7 @@ class SharedServices:
                     text_parts.append(part['text'])
                 elif isinstance(part, str):
                     text_parts.append(part)
-            return " ".join(text_parts) if text_parts else str(content)
+            return " ".join(text_parts) if text_parts else ""
         return str(content)
 
 # Singleton instance for the app to use

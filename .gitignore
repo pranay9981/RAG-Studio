@@ -80,8 +80,8 @@ WhatsApp*
 *.tmp.*
 *.bak
 
-# PyVis generated assets (written next to HTML output)
-lib/
+# PyVis generated assets (written next to HTML output, root only)
+/lib/
 
 # ============================================================
 # Next.js frontend

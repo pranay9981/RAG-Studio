@@ -319,6 +319,18 @@ Output ONLY valid JSON: {{"faithfulness": X, "relevance": X, "context_precision"
     return {"faithfulness": 5, "relevance": 5, "context_precision": 5}
 
 
+@app.get("/api/graph")
+async def get_graph():
+    pipeline = session.get_pipeline("graph_pipeline")
+    if not pipeline:
+        return {"html": ""}
+    try:
+        html = pipeline.render_graph_html()
+        return {"html": html or ""}
+    except Exception as e:
+        return {"html": "", "error": str(e)}
+
+
 @app.get("/api/history")
 async def get_history(session_id: str = Query(default="default")):
     return {"history": session.history[-20:]}

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { CompareResult, ArchInfo } from '@/lib/types'
 import { Loader2, Maximize2, X } from 'lucide-react'
 import MarkdownContent from './MarkdownContent'
+import EvalScorecard from './EvalScorecard'
 
 interface Props {
   results: CompareResult[]
@@ -89,6 +90,13 @@ export default function CompareGrid({ results, architectures, loading }: Props) 
                   : <MarkdownContent content={r.answer || 'No answer generated.'} />
                 }
               </div>
+
+              {/* Eval scores */}
+              {r.eval && (
+                <div className="px-4 pb-3 border-t border-white/[0.04] pt-2">
+                  <EvalScorecard scores={r.eval} />
+                </div>
+              )}
             </div>
           )
         })}
