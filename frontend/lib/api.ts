@@ -113,3 +113,28 @@ export async function getHistory(sessionId = 'default'): Promise<HistoryItem[]> 
   const data = await r.json()
   return data.history
 }
+
+export async function deleteDocument(source: string): Promise<{ deleted: number }> {
+  const r = await fetch(`${BASE}/api/documents`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source }),
+  })
+  if (!r.ok) throw new Error((await r.json()).detail || 'Delete failed')
+  return r.json()
+}
+
+export async function getConfigStatus(): Promise<{ has_key: boolean }> {
+  const r = await fetch(`${BASE}/api/config/status`)
+  return r.json()
+}
+
+export async function setApiKey(apiKey: string): Promise<{ status: string }> {
+  const r = await fetch(`${BASE}/api/config/apikey`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey }),
+  })
+  if (!r.ok) throw new Error((await r.json()).detail || 'Failed to set API key')
+  return r.json()
+}

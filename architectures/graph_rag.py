@@ -13,10 +13,15 @@ class GraphRAGPipeline:
         self.graph = nx.Graph()
         self.collection_name = "graph_rag_collection"
         try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        except Exception as e:
+            print(f"[{self.collection_name}] init failed ({e}) — recreating")
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        # Note: NetworkX graph is in-memory only; re-ingest to rebuild after restart
 
     def reset(self):
         try:

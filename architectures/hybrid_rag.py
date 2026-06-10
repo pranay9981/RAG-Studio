@@ -10,14 +10,36 @@ class HybridRAGPipeline:
     def __init__(self):
         self.arch_key = "01 Hybrid RAG (Dense + Sparse)"
         self.collection_name = "hybrid_rag_collection"
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.bm25 = None
         self.chunks: List[Document] = []
         self.chunk_ids: List[str] = []
+        try:
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        except Exception as e:
+            print(f"[{self.collection_name}] init failed ({e}) — recreating")
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self._rebuild_bm25_from_collection()
+
+    def _rebuild_bm25_from_collection(self):
+        """Rebuild in-memory BM25 index from persisted ChromaDB data after server restart."""
+        try:
+            if not self.collection.count():
+                return
+            result = self.collection.get(include=["documents", "metadatas", "ids"])
+            docs = result["documents"] or []
+            metas = result["metadatas"] or [{}] * len(docs)
+            ids = result["ids"] or []
+            self.chunks = [Document(page_content=t, metadata=m or {}) for t, m in zip(docs, metas)]
+            self.chunk_ids = list(ids)
+            if self.chunks:
+                from rank_bm25 import BM25Okapi
+                self.bm25 = BM25Okapi([doc.page_content.lower().split() for doc in self.chunks])
+        except Exception as e:
+            print(f"[hybrid_rag] BM25 rebuild failed: {e}")
 
     def reset(self):
         try:

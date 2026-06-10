@@ -1,5 +1,5 @@
 'use client'
-import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Sparkles, HelpCircle } from 'lucide-react'
+import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Sparkles, Key } from 'lucide-react'
 import { useState } from 'react'
 import type { ArchInfo, DocItem, HistoryItem } from '@/lib/types'
 
@@ -20,6 +20,7 @@ interface Props {
   onExport: () => void
   onAnalytics: () => void
   onDemo: () => void
+  onSettings: () => void
   children: React.ReactNode
 }
 
@@ -27,7 +28,7 @@ export default function Sidebar({
   architectures, selectedArch, compareMode, enableEval, ingestedArchs,
   messageCounts, docLibrary, history,
   onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport,
-  onAnalytics, onDemo, children,
+  onAnalytics, onDemo, onSettings, children,
 }: Props) {
   const [histOpen, setHistOpen] = useState(false)
 
@@ -84,7 +85,7 @@ export default function Sidebar({
         {/* Toggles */}
         <div className="px-4 py-3 border-b border-white/[0.06] space-y-2.5">
           {[
-            { label: 'Compare all 8', val: compareMode, fn: onCompareToggle },
+            { label: `Compare (${architectures.length})`, val: compareMode, fn: onCompareToggle },
             { label: 'RAG Evaluation', val: enableEval, fn: onEvalToggle },
           ].map(({ label, val, fn }) => (
             <label key={label} className="flex items-center justify-between cursor-pointer">
@@ -98,22 +99,6 @@ export default function Sidebar({
 
         {/* Document manager slot */}
         <div className="border-b border-white/[0.06]">{children}</div>
-
-        {/* Doc library */}
-        {docLibrary.length > 0 && (
-          <div className="px-4 py-3 border-b border-white/[0.06]">
-            <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-2">Ingested Docs</p>
-            <div className="space-y-1.5">
-              {[...new Map(docLibrary.map(d => [d.name, d])).values()].map((d, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs text-slate-400">
-                  <span className="text-slate-600">📄</span>
-                  <span className="truncate flex-1">{d.name.split('/').pop()}</span>
-                  <span className="text-slate-600 flex-shrink-0">{d.chunks}c</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* History */}
         {history.length > 0 && (
@@ -141,12 +126,13 @@ export default function Sidebar({
 
       {/* Actions */}
       <div className="px-3 py-3 border-t border-white/[0.06]">
-        <div className="grid grid-cols-4 gap-1 mb-1.5">
+        <div className="grid grid-cols-5 gap-1 mb-1.5">
           {[
-            { icon: <Trash2 size={13} />, label: 'Clear', fn: onClearChat },
-            { icon: <RotateCcw size={13} />, label: 'Reset', fn: onReset },
-            { icon: <Download size={13} />, label: 'Export', fn: onExport },
-            { icon: <BarChart2 size={13} />, label: 'Stats', fn: onAnalytics },
+            { icon: <Trash2 size={12} />, label: 'Clear', fn: onClearChat },
+            { icon: <RotateCcw size={12} />, label: 'Reset', fn: onReset },
+            { icon: <Download size={12} />, label: 'Export', fn: onExport },
+            { icon: <BarChart2 size={12} />, label: 'Stats', fn: onAnalytics },
+            { icon: <Key size={12} />, label: 'API Key', fn: onSettings },
           ].map(({ icon, label, fn }) => (
             <button
               key={label}

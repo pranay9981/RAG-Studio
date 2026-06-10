@@ -9,6 +9,7 @@ from architectures.multilingual_rag import MultilingualRAGPipeline
 from architectures.rag_fusion import RAGFusionPipeline
 from architectures.hyde_rag import HyDERAGPipeline
 from architectures.structured_rag import StructuredRAGPipeline
+from architectures.self_rag import SelfRAGPipeline
 
 ARCH_KEYS: List[str] = [
     "01 Hybrid RAG (Dense + Sparse)",
@@ -20,6 +21,7 @@ ARCH_KEYS: List[str] = [
     "07 RAG-Fusion (Query Expansion)",
     "08 HyDE RAG (Hypothetical Document)",
     "09 Structured RAG (CSV/Excel)",
+    "10 Self-RAG (Reflection + Critique)",
 ]
 
 STATE_KEY_MAP: Dict[str, str] = {
@@ -31,7 +33,8 @@ STATE_KEY_MAP: Dict[str, str] = {
     "06 Multilingual RAG (BGE-M3)":          "multilingual_pipeline",
     "07 RAG-Fusion (Query Expansion)":       "rag_fusion_pipeline",
     "08 HyDE RAG (Hypothetical Document)":   "hyde_pipeline",
-    "09 Structured RAG (CSV/Excel)":         "structured_pipeline",
+    "09 Structured RAG (CSV/Excel)":          "structured_pipeline",
+    "10 Self-RAG (Reflection + Critique)":   "self_rag_pipeline",
 }
 
 ARCH_INFO: Dict[str, Dict] = {
@@ -107,6 +110,14 @@ ARCH_INFO: Dict[str, Dict] = {
         "best_for": "Spreadsheets, CSV datasets, numerical analysis, filtering, aggregation, and statistics",
         "state_key": "structured_pipeline",
     },
+    "10 Self-RAG (Reflection + Critique)": {
+        "key": "10 Self-RAG (Reflection + Critique)",
+        "icon": "🪞", "label": "Self-RAG (Reflection + Critique Loop)",
+        "tagline": "Grades retrieved docs for relevance, then self-critiques its own answer",
+        "how": "Simulates Self-RAG paper tokens: [IsRel] grades each retrieved chunk for query relevance; [IsSup] checks if every claim in the answer is supported by context; [IsUse] checks completeness. If scores fall below threshold, the query is refined towards the gaps and a second retrieval+generation loop runs.",
+        "best_for": "High-accuracy use cases where faithfulness and completeness matter most",
+        "state_key": "self_rag_pipeline",
+    },
 }
 
 
@@ -122,6 +133,7 @@ class GlobalSession:
             "rag_fusion_pipeline":   RAGFusionPipeline(),
             "hyde_pipeline":         HyDERAGPipeline(),
             "structured_pipeline":   StructuredRAGPipeline(),
+            "self_rag_pipeline":     SelfRAGPipeline(),
         }
         self.history: List[Dict] = []
         self.ingested_archs: Set[str] = set()

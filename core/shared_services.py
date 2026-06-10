@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import List, Any, Optional
 import chromadb
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -20,7 +21,26 @@ class SharedServices:
         )
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         self.multilingual_embeddings = self.embeddings
-        self.chroma_client = chromadb.EphemeralClient()
+        self.chroma_client = self._init_chroma_client()
+
+    def _init_chroma_client(self):
+        """PersistentClient with safe migration — wipes directory on HNSW corruption and retries."""
+        chroma_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "chroma_db")
+        )
+        for attempt in range(2):
+            try:
+                client = chromadb.PersistentClient(path=chroma_path)
+                client.list_collections()  # smoke-test to catch stale segment files
+                return client
+            except Exception as e:
+                if attempt == 0:
+                    print(f"[chroma] PersistentClient failed ({e}) — resetting directory")
+                    shutil.rmtree(chroma_path, ignore_errors=True)
+                else:
+                    print(f"[chroma] retry failed ({e}) — falling back to EphemeralClient")
+                    return chromadb.EphemeralClient()
+        return chromadb.EphemeralClient()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000, chunk_overlap=200
         )

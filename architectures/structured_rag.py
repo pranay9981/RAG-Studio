@@ -18,12 +18,33 @@ class StructuredRAGPipeline:
     def __init__(self):
         self.arch_key = "09 Structured RAG (CSV/Excel)"
         self.collection_name = "structured_rag_collection"
-        self._table_store: dict = {}  # source -> {columns, csv_text}
+        self._table_store: dict = {}
         try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        except Exception as e:
+            print(f"[{self.collection_name}] init failed ({e}) — recreating")
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        self._rebuild_table_store()
+
+    def _rebuild_table_store(self):
+        """Rebuild in-memory table store from persisted ChromaDB data after server restart."""
+        try:
+            if not self.collection.count():
+                return
+            result = self.collection.get(include=["documents", "metadatas"])
+            for text, meta in zip(result["documents"] or [], result["metadatas"] or []):
+                meta = meta or {}
+                if meta.get("type") in ("csv", "excel"):
+                    self._table_store[meta.get("source", "unknown")] = {
+                        "columns": json.loads(meta.get("columns", "[]")),
+                        "csv_text": text,
+                    }
+        except Exception as e:
+            print(f"[structured_rag] table store rebuild failed: {e}")
 
     def reset(self):
         try:

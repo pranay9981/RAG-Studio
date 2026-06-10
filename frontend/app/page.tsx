@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Send, Loader2, Network, X, HelpCircle } from 'lucide-react'
+import ApiKeyModal from '@/components/ApiKeyModal'
 import Sidebar from '@/components/Sidebar'
 import ArchCard from '@/components/ArchCard'
 import ChatMessage from '@/components/ChatMessage'
@@ -12,7 +13,7 @@ import AnalyticsDashboard from '@/components/AnalyticsDashboard'
 import ArchExplainer from '@/components/ArchExplainer'
 import {
   getArchitectures, streamQuery, compareAll, evaluateAnswer,
-  resetSession, getGraphHtml, submitFeedback, loadDemo, getAnalytics,
+  resetSession, getGraphHtml, submitFeedback, loadDemo, getAnalytics, getConfigStatus,
 } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
@@ -46,16 +47,18 @@ export default function Page() {
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null)
   const [showExplainer, setShowExplainer] = useState(false)
   const [demoLoading, setDemoLoading] = useState(false)
+  const [showApiKey, setShowApiKey] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
-  // Load architectures
+  // Load architectures + check API key
   useEffect(() => {
     getArchitectures().then(list => {
       setArchs(list)
       if (list.length) setSelectedArch(list[0].key)
     })
+    getConfigStatus().then(({ has_key }) => { if (!has_key) setShowApiKey(true) }).catch(() => {})
   }, [])
 
   // Session persistence — restore messages from localStorage
@@ -231,6 +234,13 @@ export default function Page() {
     try { localStorage.removeItem(LS_KEY) } catch {}
   }
 
+  const handleDeleteDoc = useCallback((source: string) => {
+    setDocLibrary(prev => prev.filter(d => {
+      const label = d.name.split('/').pop()?.split('\\').pop() || d.name
+      return label !== source && d.name !== source
+    }))
+  }, [])
+
   const handleExport = () => {
     const md = currentMessages
       .map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
@@ -263,6 +273,7 @@ export default function Page() {
         onExport={handleExport}
         onAnalytics={handleOpenAnalytics}
         onDemo={handleLoadDemo}
+        onSettings={() => setShowApiKey(true)}
       >
         <DocumentManager
           archKeys={archs.map(a => a.key)}
@@ -270,6 +281,8 @@ export default function Page() {
             setDocLibrary(prev => [...prev, { name: source, chunks }])
             setIngestedArchs(new Set(archs.map(a => a.key)))
           }}
+          docLibrary={docLibrary}
+          onDocDeleted={handleDeleteDoc}
         />
       </Sidebar>
 
@@ -300,7 +313,7 @@ export default function Page() {
         )}
         {compareMode && (
           <div className="px-6 py-3 border-b border-white/[0.06] bg-indigo-500/5 flex items-center gap-2">
-            <span className="text-xs font-medium text-indigo-300">🔍 Compare Mode — all 8 architectures run simultaneously</span>
+            <span className="text-xs font-medium text-indigo-300">🔍 Compare Mode — all {archs.length} architectures run simultaneously</span>
           </div>
         )}
 
@@ -411,6 +424,14 @@ export default function Page() {
       {/* Arch Explainer Modal */}
       {showExplainer && currentArch && (
         <ArchExplainer arch={currentArch} onClose={() => setShowExplainer(false)} />
+      )}
+
+      {/* API Key Modal */}
+      {showApiKey && (
+        <ApiKeyModal
+          onClose={() => setShowApiKey(false)}
+          onKeySet={() => setShowApiKey(false)}
+        />
       )}
     </div>
   )

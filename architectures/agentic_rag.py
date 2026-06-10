@@ -18,10 +18,14 @@ class AgenticRAGPipeline:
         self._on_step = None
         self.collection_name = "agentic_rag_collection"
         try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        except Exception as e:
+            print(f"[{self.collection_name}] init failed ({e}) — recreating")
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph = self._build_graph()
 
     def reset(self):
