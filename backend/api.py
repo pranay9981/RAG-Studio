@@ -160,7 +160,7 @@ async def ingest_document(
     if not docs:
         raise HTTPException(status_code=422, detail="No content could be extracted")
 
-    # Ingest into each target pipeline
+    # Ingest into each target pipeline (continue on individual failures)
     ingested: List[str] = []
     for arch_key in target_keys:
         state_key = STATE_KEY_MAP.get(arch_key)
@@ -168,9 +168,12 @@ async def ingest_document(
             continue
         pipeline = session.get_pipeline(state_key)
         if pipeline:
-            pipeline.ingest(docs)
-            session.ingested_archs.add(arch_key)
-            ingested.append(arch_key)
+            try:
+                pipeline.ingest(docs)
+                session.ingested_archs.add(arch_key)
+                ingested.append(arch_key)
+            except Exception as exc:
+                print(f"[ingest] {arch_key} failed: {exc}")
 
     session.doc_library.append({"name": source_name, "chunks": len(docs)})
 

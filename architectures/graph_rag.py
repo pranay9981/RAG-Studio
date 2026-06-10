@@ -56,7 +56,10 @@ Text:
         existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
         ids = [f"graph_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
-        metadatas = [doc.metadata for doc in documents]
+        metadatas = [
+            {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
+            for doc in documents
+        ]
         embeddings = services.embeddings.embed_documents(texts)
 
         self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)

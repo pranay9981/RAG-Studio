@@ -1,6 +1,7 @@
 import type { ChatMessage as Msg } from '@/lib/types'
 import SourcePanel from './SourcePanel'
 import EvalScorecard from './EvalScorecard'
+import MarkdownContent from './MarkdownContent'
 
 interface Props { message: Msg; archIcon?: string }
 
@@ -25,8 +26,8 @@ export default function ChatMessage({ message, archIcon }: Props) {
           <span className="text-[10px] font-mono text-slate-600">{message.elapsed.toFixed(2)}s</span>
         )}
       </div>
-      <div className="max-w-[88%] px-4 py-3 rounded-2xl rounded-tl-sm bg-surface border border-white/[0.06] text-sm text-slate-200 leading-relaxed prose-dark whitespace-pre-wrap">
-        {message.content}
+      <div className="max-w-[88%] px-4 py-3 rounded-2xl rounded-tl-sm bg-surface border border-white/[0.06] text-sm leading-relaxed">
+        <MarkdownContent content={message.content} />
       </div>
       {message.sources && message.sources.length > 0 && (
         <div className="max-w-[88%]">

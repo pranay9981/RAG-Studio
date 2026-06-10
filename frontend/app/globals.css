@@ -28,6 +28,12 @@ body {
 }
 @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
 
+/* Thin scrollbar for compare cards */
+.scrollbar-thin::-webkit-scrollbar { width: 3px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
 .prose-dark { line-height: 1.7; }
 .prose-dark p { margin-bottom: 0.75rem; }
 .prose-dark strong { color: #f1f5f9; }

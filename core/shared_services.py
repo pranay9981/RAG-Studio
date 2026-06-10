@@ -25,8 +25,8 @@ class SharedServices:
         # Reusing the same model for multilingual to prevent 'No space left on disk' errors during large model downloads
         self.multilingual_embeddings = self.embeddings
         
-        # 3. Initialize ChromaDB Client
-        self.chroma_client = chromadb.PersistentClient(path="./data/chroma_db")
+        # 3. Initialize ChromaDB Client (in-memory — avoids HNSW file corruption on PersistentClient)
+        self.chroma_client = chromadb.EphemeralClient()
         
         # 4. Text Splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
