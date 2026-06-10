@@ -132,8 +132,7 @@ d:\Multiple RAG System\
 #### [NEW] [.env.example](file:///d:/Multiple%20RAG%20System/.env.example)
 Template for required API keys:
 ```env
-GOOGLE_API_KEY=your-gemini-api-key-here
-TAVILY_API_KEY=optional-for-enhanced-web-search
+GROQ_API_KEY=your-groq-api-key-here
 ```
 
 #### [NEW] [.gitignore](file:///d:/Multiple%20RAG%20System/.gitignore)
@@ -143,8 +142,7 @@ Standard Python gitignore + `.env`, `data/uploads/`, `data/processed/`, ChromaDB
 Pydantic settings model loading from `.env`:
 ```python
 class Settings(BaseSettings):
-    google_api_key: str
-    tavily_api_key: str | None = None
+    groq_api_key: str
     
     # Model configuration
     generation_model: str = "gemini-2.5-flash-preview-05-20"
