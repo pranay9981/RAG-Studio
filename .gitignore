@@ -82,3 +82,11 @@ WhatsApp*
 
 # PyVis generated assets (written next to HTML output)
 lib/
+
+# ============================================================
+# Next.js frontend
+# ============================================================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
