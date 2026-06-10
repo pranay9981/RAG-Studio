@@ -1,4 +1,4 @@
-import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, HistoryItem } from './types'
+import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, HistoryItem, AnalyticsData } from './types'
 
 const BASE = 'http://127.0.0.1:8000'
 
@@ -16,11 +16,7 @@ export async function resetSession(sessionId: string) {
   await fetch(`${BASE}/api/sessions/${sessionId}`, { method: 'DELETE' })
 }
 
-export async function ingestFile(
-  file: File,
-  archKeys: string[],
-  sessionId = 'default',
-): Promise<{ chunks: number; source: string }> {
+export async function ingestFile(file: File, archKeys: string[], sessionId = 'default'): Promise<{ chunks: number; source: string }> {
   const fd = new FormData()
   fd.append('session_id', sessionId)
   fd.append('arch_keys', JSON.stringify(archKeys))
@@ -30,17 +26,19 @@ export async function ingestFile(
   return r.json()
 }
 
-export async function ingestUrl(
-  url: string,
-  archKeys: string[],
-  sessionId = 'default',
-): Promise<{ chunks: number; source: string }> {
+export async function ingestUrl(url: string, archKeys: string[], sessionId = 'default'): Promise<{ chunks: number; source: string }> {
   const fd = new FormData()
   fd.append('session_id', sessionId)
   fd.append('arch_keys', JSON.stringify(archKeys))
   fd.append('url', url)
   const r = await fetch(`${BASE}/api/ingest`, { method: 'POST', body: fd })
   if (!r.ok) throw new Error((await r.json()).detail || 'Ingest failed')
+  return r.json()
+}
+
+export async function loadDemo(): Promise<{ chunks: number; source: string; architectures: string[] }> {
+  const r = await fetch(`${BASE}/api/demo/load`, { method: 'POST' })
+  if (!r.ok) throw new Error('Demo load failed')
   return r.json()
 }
 
@@ -52,7 +50,7 @@ export function streamQuery(
     onStep: (s: string) => void
     onToken: (t: string) => void
     onSources: (s: Source[]) => void
-    onDone: (answer: string, elapsed: number) => void
+    onDone: (answer: string, elapsed: number, cached: boolean) => void
     onError: (e: string) => void
   },
 ): () => void {
@@ -64,7 +62,7 @@ export function streamQuery(
     if (d.type === 'step') callbacks.onStep(d.content)
     else if (d.type === 'token') callbacks.onToken(d.content)
     else if (d.type === 'sources') callbacks.onSources(d.content)
-    else if (d.type === 'done') { callbacks.onDone(d.answer, d.elapsed); es.close() }
+    else if (d.type === 'done') { callbacks.onDone(d.answer, d.elapsed, d.cached || false); es.close() }
     else if (d.type === 'error') { callbacks.onError(d.content); es.close() }
   }
   es.onerror = () => { callbacks.onError('Connection error'); es.close() }
@@ -82,16 +80,25 @@ export async function compareAll(query: string, sessionId = 'default'): Promise<
   return data.results
 }
 
-export async function evaluateAnswer(
-  query: string,
-  answer: string,
-  sources: Source[],
-): Promise<EvalScore> {
+export async function evaluateAnswer(query: string, answer: string, sources: Source[], archKey = ''): Promise<EvalScore> {
   const r = await fetch(`${BASE}/api/evaluate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, answer, sources }),
+    body: JSON.stringify({ query, answer, sources, arch_key: archKey }),
   })
+  return r.json()
+}
+
+export async function submitFeedback(query: string, archKey: string, chunkIds: string[], rating: number): Promise<void> {
+  await fetch(`${BASE}/api/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, arch_key: archKey, chunk_ids: chunkIds, rating }),
+  })
+}
+
+export async function getAnalytics(): Promise<AnalyticsData> {
+  const r = await fetch(`${BASE}/api/analytics`)
   return r.json()
 }
 

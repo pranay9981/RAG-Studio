@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Loader2, Network, X } from 'lucide-react'
+import { Send, Loader2, Network, X, HelpCircle } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import ArchCard from '@/components/ArchCard'
 import ChatMessage from '@/components/ChatMessage'
@@ -8,13 +8,19 @@ import BrainWorking from '@/components/BrainWorking'
 import SourcePanel from '@/components/SourcePanel'
 import CompareGrid from '@/components/CompareGrid'
 import DocumentManager from '@/components/DocumentManager'
-import { getArchitectures, streamQuery, compareAll, evaluateAnswer, resetSession, getGraphHtml } from '@/lib/api'
-import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult } from '@/lib/types'
+import AnalyticsDashboard from '@/components/AnalyticsDashboard'
+import ArchExplainer from '@/components/ArchExplainer'
+import {
+  getArchitectures, streamQuery, compareAll, evaluateAnswer,
+  resetSession, getGraphHtml, submitFeedback, loadDemo, getAnalytics,
+} from '@/lib/api'
+import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
 
 const SESSION_ID = 'default'
 const GRAPH_ARCH = '02 Graph RAG (Knowledge Graphs)'
 const COMPARE_KEY = '__compare__'
+const LS_KEY = 'rag-studio-messages'
 
 export default function Page() {
   const [archs, setArchs] = useState<ArchInfo[]>([])
@@ -22,9 +28,7 @@ export default function Page() {
   const [compareMode, setCompareMode] = useState(false)
   const [enableEval, setEnableEval] = useState(false)
 
-  // Per-architecture chat threads keyed by arch key (or COMPARE_KEY)
   const [allMessages, setAllMessages] = useState<Record<string, Msg[]>>({})
-  // Per-architecture compare results
   const [allCompareResults, setAllCompareResults] = useState<Record<string, CompareResult[]>>({})
 
   const [input, setInput] = useState('')
@@ -38,9 +42,15 @@ export default function Page() {
   const [compareLoading, setCompareLoading] = useState(false)
   const [graphHtml, setGraphHtml] = useState('')
   const [showGraph, setShowGraph] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null)
+  const [showExplainer, setShowExplainer] = useState(false)
+  const [demoLoading, setDemoLoading] = useState(false)
+
   const bottomRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
+  // Load architectures
   useEffect(() => {
     getArchitectures().then(list => {
       setArchs(list)
@@ -48,12 +58,25 @@ export default function Page() {
     })
   }, [])
 
-  // Current thread key
+  // Session persistence — restore messages from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY)
+      if (saved) setAllMessages(JSON.parse(saved))
+    } catch {}
+  }, [])
+
+  // Persist messages to localStorage on every change
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify(allMessages))
+    } catch {}
+  }, [allMessages])
+
   const chatKey = compareMode ? COMPARE_KEY : selectedArch
   const currentMessages = allMessages[chatKey] ?? []
   const currentCompareResults = allCompareResults[chatKey] ?? []
 
-  // Message counts per arch (assistant messages only) for sidebar badge
   const messageCounts: Record<string, number> = {}
   for (const [k, msgs] of Object.entries(allMessages)) {
     messageCounts[k] = msgs.filter(m => m.role === 'assistant').length
@@ -63,7 +86,9 @@ export default function Page() {
     setAllMessages(prev => ({ ...prev, [key]: [...(prev[key] ?? []), msg] }))
   }, [])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [currentMessages, tokens, steps, currentCompareResults])
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [currentMessages, tokens, steps, currentCompareResults])
 
   const currentArch = archs.find(a => a.key === selectedArch)
 
@@ -73,14 +98,57 @@ export default function Page() {
     setShowGraph(true)
   }, [])
 
+  const handleOpenAnalytics = useCallback(async () => {
+    try {
+      const data = await getAnalytics()
+      setAnalyticsData(data)
+      setShowAnalytics(true)
+    } catch {}
+  }, [])
+
+  const handleLoadDemo = useCallback(async () => {
+    if (demoLoading) return
+    setDemoLoading(true)
+    try {
+      const result = await loadDemo()
+      setDocLibrary(prev => [...prev, { name: result.source, chunks: result.chunks }])
+      setIngestedArchs(new Set(result.architectures))
+    } catch (e) {
+      console.error('Demo load failed', e)
+    } finally {
+      setDemoLoading(false)
+    }
+  }, [demoLoading])
+
+  const handleFeedback = useCallback(async (messageId: string, rating: number) => {
+    const msgs = allMessages[chatKey] ?? []
+    const msgIdx = msgs.findIndex(m => m.id === messageId)
+    if (msgIdx === -1) return
+    const msg = msgs[msgIdx]
+    if (msg.role !== 'assistant') return
+
+    const lastUserMsg = msgs.slice(0, msgIdx).reverse().find(m => m.role === 'user')
+    const query = lastUserMsg?.content || ''
+
+    try {
+      await submitFeedback(query, msg.arch || selectedArch, msg.chunk_ids || [], rating)
+    } catch {}
+
+    setAllMessages(prev => ({
+      ...prev,
+      [chatKey]: (prev[chatKey] ?? []).map(m =>
+        m.id === messageId ? { ...m, feedback: rating > 0 ? 'up' : 'down' } : m
+      ),
+    }))
+  }, [allMessages, chatKey, selectedArch])
+
   const handleSend = useCallback(async () => {
     const q = input.trim()
     if (!q || isStreaming) return
     setInput('')
 
     const key = compareMode ? COMPARE_KEY : selectedArch
-    const userMsg: Msg = { id: uuidv4(), role: 'user', content: q }
-    appendMsg(key, userMsg)
+    appendMsg(key, { id: uuidv4(), role: 'user', content: q })
 
     if (compareMode) {
       setCompareLoading(true)
@@ -88,26 +156,19 @@ export default function Page() {
       try {
         const results = await compareAll(q, SESSION_ID)
         let final = results
-
         if (enableEval) {
           final = await Promise.all(
             results.map(async r => {
               if (r.error || !r.answer) return r
               try {
-                const evalScore = await evaluateAnswer(q, r.answer, [])
+                const evalScore = await evaluateAnswer(q, r.answer, [], r.arch_key)
                 return { ...r, eval: evalScore }
               } catch { return r }
             })
           )
         }
-
         setAllCompareResults(prev => ({ ...prev, [key]: final }))
-        setHistory(prev => [...prev, {
-          query: q,
-          arch: 'Compare All',
-          elapsed: Math.max(...results.map(r => r.elapsed)),
-          answer: '',
-        }])
+        setHistory(prev => [...prev, { query: q, arch: 'Compare All', elapsed: Math.max(...results.map(r => r.elapsed)), answer: '' }])
       } finally { setCompareLoading(false) }
       return
     }
@@ -123,10 +184,10 @@ export default function Page() {
       onStep: s => setSteps(prev => [...prev, s]),
       onToken: t => setTokens(prev => prev + t),
       onSources: s => { collectedSources = s; setLiveSource(s) },
-      onDone: async (answer, elapsed) => {
+      onDone: async (answer, elapsed, cached) => {
         let evalScore: EvalScore | undefined
         if (enableEval && answer) {
-          try { evalScore = await evaluateAnswer(q, answer, collectedSources) } catch {}
+          try { evalScore = await evaluateAnswer(q, answer, collectedSources, selectedArch) } catch {}
         }
         appendMsg(selectedArch, {
           id: uuidv4(),
@@ -136,6 +197,8 @@ export default function Page() {
           elapsed,
           sources: collectedSources,
           eval: evalScore,
+          cached,
+          chunk_ids: collectedSources.map(s => s.text.slice(0, 80)),
         })
         setHistory(prev => [...prev, { query: q, arch: selectedArch, elapsed, answer: answer.slice(0, 120) }])
         setIsStreaming(false)
@@ -165,6 +228,7 @@ export default function Page() {
     setDocLibrary([])
     setHistory([])
     setGraphHtml('')
+    try { localStorage.removeItem(LS_KEY) } catch {}
   }
 
   const handleExport = () => {
@@ -197,6 +261,8 @@ export default function Page() {
         onClearChat={handleClearChat}
         onReset={handleReset}
         onExport={handleExport}
+        onAnalytics={handleOpenAnalytics}
+        onDemo={handleLoadDemo}
       >
         <DocumentManager
           archKeys={archs.map(a => a.key)}
@@ -212,15 +278,24 @@ export default function Page() {
         {currentArch && !compareMode && (
           <div className="flex items-center justify-between pr-4">
             <ArchCard arch={currentArch} />
-            {showGraphBtn && (
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
-                onClick={handleOpenGraph}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-colors flex-shrink-0"
+                onClick={() => setShowExplainer(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-slate-400 text-xs font-medium hover:bg-white/[0.07] hover:text-slate-200 transition-colors"
               >
-                <Network size={13} />
-                Knowledge Graph
+                <HelpCircle size={12} />
+                How it works
               </button>
-            )}
+              {showGraphBtn && (
+                <button
+                  onClick={handleOpenGraph}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-colors"
+                >
+                  <Network size={13} />
+                  Knowledge Graph
+                </button>
+              )}
+            </div>
           </div>
         )}
         {compareMode && (
@@ -237,14 +312,19 @@ export default function Page() {
               <p className="text-lg font-semibold text-slate-300">RAG Studio</p>
               <p className="text-sm text-slate-500 max-w-sm">
                 {compareMode
-                  ? 'Upload a document, then ask a question to compare all 8 architectures.'
-                  : `Upload a document, then ask ${currentArch?.label || 'this architecture'} a question.`}
+                  ? 'Upload a document or load the demo, then ask a question to compare all 8 architectures.'
+                  : `Click "Load Demo Document" in the sidebar, or upload your own file, then start asking questions.`}
               </p>
             </div>
           )}
 
           {currentMessages.map(msg => (
-            <ChatMessage key={msg.id} message={msg} archIcon={archs.find(a => a.key === msg.arch)?.icon} />
+            <ChatMessage
+              key={msg.id}
+              message={msg}
+              archIcon={archs.find(a => a.key === msg.arch)?.icon}
+              onFeedback={msg.role === 'assistant' ? handleFeedback : undefined}
+            />
           ))}
 
           {isStreaming && (
@@ -275,14 +355,18 @@ export default function Page() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              placeholder={ingestedArchs.size === 0 ? 'Upload a document first…' : 'Ask a question… (Enter to send, Shift+Enter for newline)'}
+              placeholder={
+                demoLoading ? 'Loading demo document…'
+                : ingestedArchs.size === 0 ? 'Upload a document or load the demo first…'
+                : 'Ask a question… (Enter to send, Shift+Enter for newline)'
+              }
               rows={1}
               className="flex-1 resize-none bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/40 transition-colors leading-relaxed"
               style={{ maxHeight: '120px', overflowY: 'auto' }}
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming || compareLoading}
+              disabled={!input.trim() || isStreaming || compareLoading || demoLoading}
               className="flex-shrink-0 w-10 h-10 rounded-xl bg-indigo-500 hover:bg-accent-h disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
             >
               {isStreaming || compareLoading
@@ -317,6 +401,16 @@ export default function Page() {
             }
           </div>
         </div>
+      )}
+
+      {/* Analytics Modal */}
+      {showAnalytics && analyticsData && (
+        <AnalyticsDashboard data={analyticsData} onClose={() => setShowAnalytics(false)} />
+      )}
+
+      {/* Arch Explainer Modal */}
+      {showExplainer && currentArch && (
+        <ArchExplainer arch={currentArch} onClose={() => setShowExplainer(false)} />
       )}
     </div>
   )

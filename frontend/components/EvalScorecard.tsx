@@ -2,7 +2,8 @@ import type { EvalScore } from '@/lib/types'
 
 interface Props { scores: EvalScore }
 
-function ScorePill({ label, score }: { label: string; score: number }) {
+function ScorePill({ label, score }: { label: string; score: number | null | undefined }) {
+  if (score == null) return null
   const color = score >= 7 ? 'text-green-400 bg-green-400/10 border-green-400/20'
     : score >= 4 ? 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20'
     : 'text-red-400 bg-red-400/10 border-red-400/20'
@@ -16,11 +17,12 @@ function ScorePill({ label, score }: { label: string; score: number }) {
 
 export default function EvalScorecard({ scores }: Props) {
   return (
-    <div className="mt-2 flex items-center gap-2">
+    <div className="mt-2 flex items-center gap-2 flex-wrap">
       <span className="text-[10px] text-slate-500 mr-1">RAG Eval</span>
       <ScorePill label="Faithful" score={scores.faithfulness} />
       <ScorePill label="Relevant" score={scores.relevance} />
       <ScorePill label="Precision" score={scores.context_precision} />
+      <ScorePill label="Recall" score={scores.context_recall} />
     </div>
   )
 }

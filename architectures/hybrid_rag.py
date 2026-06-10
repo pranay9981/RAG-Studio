@@ -51,7 +51,9 @@ class HybridRAGPipeline:
         tokenized_corpus = [doc.page_content.lower().split() for doc in self.chunks]
         self.bm25 = BM25Okapi(tokenized_corpus)
 
-    def _reciprocal_rank_fusion(self, dense_results: List[Dict], sparse_results: List[Dict], k: int = 60) -> List[Dict]:
+    def _reciprocal_rank_fusion(
+        self, dense_results: List[Dict], sparse_results: List[Dict], k: int = 60
+    ) -> List[Dict]:
         fused_scores: Dict[str, Dict] = {}
         for rank, doc in enumerate(dense_results):
             doc_id = doc["id"]
@@ -89,6 +91,7 @@ class HybridRAGPipeline:
                 "id": dense_response["ids"][0][i],
                 "text": dense_response["documents"][0][i],
                 "source": (dense_response["metadatas"][0][i] or {}).get("source", "Unknown"),
+                "window_text": (dense_response["metadatas"][0][i] or {}).get("window_text"),
             }
             for i in range(len(dense_response["ids"][0]))
         ]
@@ -102,27 +105,52 @@ class HybridRAGPipeline:
                 "id": self.chunk_ids[idx],
                 "text": self.chunks[idx].page_content,
                 "source": self.chunks[idx].metadata.get("source", "Unknown"),
+                "window_text": self.chunks[idx].metadata.get("window_text"),
             }
             for idx in top_sparse_indices
         ]
 
         step("Applying Reciprocal Rank Fusion (RRF k=60)…")
         fused = self._reciprocal_rank_fusion(dense_results, sparse_results, k=60)
-        candidates = fused[:top_k * 2]
+        candidates = fused[: top_k * 2]
 
         step("Re-ranking with cross-encoder…")
         scored = services.rerank(query, [c["text"] for c in candidates], top_n=top_k)
-        reranked_texts = [text for _, text in scored]
 
-        src_map = {c["text"]: c.get("source", "Unknown") for c in candidates}
+        # Self-evaluation on re-ranked results
+        reranked_texts = [text for _, text in scored]
+        quality = services.evaluate_context(query, reranked_texts)
+        _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
+        step(f"Context quality: {_icons.get(quality, '')} {quality}")
+
+        if quality == "INCORRECT":
+            step("Insufficient context — web search fallback…")
+            web = services.web_search_fallback(query)
+            if web:
+                reranked_texts = web
+        elif quality == "AMBIGUOUS":
+            web = services.web_search_fallback(query, n=2)
+            if web:
+                reranked_texts = reranked_texts + web
+
+        window_map = {c["text"]: c.get("window_text") for c in candidates}
         if on_step:
             sources = [
-                {"text": text[:300], "source": src_map.get(text, "Unknown"), "score": round(score, 3)}
+                {
+                    "text": text[:300],
+                    "source": next(
+                        (c.get("source", "Unknown") for c in candidates if c["text"] == text),
+                        "Unknown",
+                    ),
+                    "score": round(score, 3),
+                }
                 for score, text in scored
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(reranked_texts)
+        context = "\n\n".join(
+            window_map.get(t) or t for t in reranked_texts
+        )
 
         step("Generating answer with Gemini…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
@@ -133,4 +161,6 @@ Context:
 Query: {query}
 
 Answer:"""
-        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))
+        return services.stream_llm(
+            prompt, on_token=lambda t: on_step and on_step(("token", t))
+        )

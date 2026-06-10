@@ -27,18 +27,13 @@ class RAGFusionPipeline:
         existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
         metadatas = [
-            {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
+            {k: v for k, v in doc.metadata.items()
+             if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
             for doc in documents
         ]
         ids = [f"ragfusion_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=ids,
-        )
+        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def _generate_sub_queries(self, query: str, n: int = 4) -> List[str]:
         prompt = f"""You are an expert at generating multiple search queries for document retrieval.
@@ -56,7 +51,9 @@ Original query: {query}
             queries += [query] * (n - len(queries))
         return queries[:n]
 
-    def _reciprocal_rank_fusion(self, all_ranked_lists: List[List[Dict]], k: int = 60) -> List[Dict]:
+    def _reciprocal_rank_fusion(
+        self, all_ranked_lists: List[List[Dict]], k: int = 60
+    ) -> List[Dict]:
         fused_scores: Dict[str, Dict] = {}
         for ranked_list in all_ranked_lists:
             for rank, doc in enumerate(ranked_list):
@@ -94,6 +91,7 @@ Original query: {query}
                     "id": results["ids"][0][j],
                     "text": results["documents"][0][j],
                     "source": (results["metadatas"][0][j] or {}).get("source", "Unknown"),
+                    "window_text": (results["metadatas"][0][j] or {}).get("window_text"),
                 }
                 for j in range(len(results["ids"][0]))
             ]
@@ -101,15 +99,36 @@ Original query: {query}
 
         step(f"Fusing {len(sub_queries)} ranked lists with Reciprocal Rank Fusion…")
         fused = self._reciprocal_rank_fusion(all_ranked_lists)
+        top_docs = fused[:top_k]
 
-        if on_step and fused:
+        # Self-evaluation
+        top_texts = [d["text"] for d in top_docs]
+        quality = services.evaluate_context(query, top_texts)
+        _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
+        step(f"Context quality: {_icons.get(quality, '')} {quality}")
+
+        if quality == "INCORRECT":
+            step("Insufficient context — web search fallback…")
+            web = services.web_search_fallback(query)
+            if web:
+                top_texts = web
+                top_docs = [{"text": t, "source": "web", "window_text": None} for t in web]
+        elif quality == "AMBIGUOUS":
+            web = services.web_search_fallback(query, n=2)
+            if web:
+                top_texts = top_texts + web
+                top_docs = top_docs + [{"text": t, "source": "web", "window_text": None} for t in web]
+
+        if on_step and top_docs:
             sources = [
                 {"text": doc["text"][:300], "source": doc.get("source", "Unknown")}
-                for doc in fused[:top_k]
+                for doc in top_docs[:top_k]
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(doc["text"] for doc in fused[:top_k])
+        context = "\n\n".join(
+            doc.get("window_text") or doc["text"] for doc in top_docs[:top_k]
+        )
 
         step("Generating final answer with Gemini…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
@@ -121,4 +140,6 @@ Context:
 Original Query: {query}
 
 Answer:"""
-        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))
+        return services.stream_llm(
+            prompt, on_token=lambda t: on_step and on_step(("token", t))
+        )

@@ -1,5 +1,5 @@
 'use client'
-import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp } from 'lucide-react'
+import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Sparkles, HelpCircle } from 'lucide-react'
 import { useState } from 'react'
 import type { ArchInfo, DocItem, HistoryItem } from '@/lib/types'
 
@@ -18,10 +18,17 @@ interface Props {
   onClearChat: () => void
   onReset: () => void
   onExport: () => void
-  children: React.ReactNode // DocumentManager slot
+  onAnalytics: () => void
+  onDemo: () => void
+  children: React.ReactNode
 }
 
-export default function Sidebar({ architectures, selectedArch, compareMode, enableEval, ingestedArchs, messageCounts, docLibrary, history, onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport, children }: Props) {
+export default function Sidebar({
+  architectures, selectedArch, compareMode, enableEval, ingestedArchs,
+  messageCounts, docLibrary, history,
+  onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport,
+  onAnalytics, onDemo, children,
+}: Props) {
   const [histOpen, setHistOpen] = useState(false)
 
   return (
@@ -30,7 +37,18 @@ export default function Sidebar({ architectures, selectedArch, compareMode, enab
       <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center gap-2.5">
         <div className="w-6 h-6 rounded bg-indigo-500/20 flex items-center justify-center text-xs">⚡</div>
         <span className="text-sm font-semibold text-white/90 tracking-tight">RAG Studio</span>
-        <span className="ml-auto text-[10px] font-mono text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded">v2</span>
+        <span className="ml-auto text-[10px] font-mono text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded">v3</span>
+      </div>
+
+      {/* Demo loader */}
+      <div className="px-3 py-2.5 border-b border-white/[0.06]">
+        <button
+          onClick={onDemo}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-medium hover:bg-indigo-500/15 transition-colors"
+        >
+          <Sparkles size={12} />
+          Load Demo Document
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -42,7 +60,11 @@ export default function Sidebar({ architectures, selectedArch, compareMode, enab
               <button
                 key={a.key}
                 onClick={() => onSelectArch(a.key)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all text-xs ${selectedArch === a.key ? 'bg-indigo-500/15 border border-indigo-500/25 text-indigo-200' : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border border-transparent'}`}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all text-xs ${
+                  selectedArch === a.key
+                    ? 'bg-indigo-500/15 border border-indigo-500/25 text-indigo-200'
+                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border border-transparent'
+                }`}
               >
                 <span className="text-sm flex-shrink-0">{a.icon}</span>
                 <span className="truncate flex-1">{a.key}</span>
@@ -96,7 +118,10 @@ export default function Sidebar({ architectures, selectedArch, compareMode, enab
         {/* History */}
         {history.length > 0 && (
           <div className="border-b border-white/[0.06]">
-            <button onClick={() => setHistOpen(o => !o)} className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-slate-400 hover:text-slate-200">
+            <button
+              onClick={() => setHistOpen(o => !o)}
+              className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-slate-400 hover:text-slate-200"
+            >
               <span className="flex items-center gap-1.5"><History size={11} /> History ({history.length})</span>
               {histOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
             </button>
@@ -115,16 +140,23 @@ export default function Sidebar({ architectures, selectedArch, compareMode, enab
       </div>
 
       {/* Actions */}
-      <div className="px-3 py-3 border-t border-white/[0.06] flex gap-1.5">
-        {[
-          { icon: <Trash2 size={13} />, label: 'Clear', fn: onClearChat },
-          { icon: <RotateCcw size={13} />, label: 'Reset', fn: onReset },
-          { icon: <Download size={13} />, label: 'Export', fn: onExport },
-        ].map(({ icon, label, fn }) => (
-          <button key={label} onClick={fn} className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-colors text-[10px]">
-            {icon}{label}
-          </button>
-        ))}
+      <div className="px-3 py-3 border-t border-white/[0.06]">
+        <div className="grid grid-cols-4 gap-1 mb-1.5">
+          {[
+            { icon: <Trash2 size={13} />, label: 'Clear', fn: onClearChat },
+            { icon: <RotateCcw size={13} />, label: 'Reset', fn: onReset },
+            { icon: <Download size={13} />, label: 'Export', fn: onExport },
+            { icon: <BarChart2 size={13} />, label: 'Stats', fn: onAnalytics },
+          ].map(({ icon, label, fn }) => (
+            <button
+              key={label}
+              onClick={fn}
+              className="flex flex-col items-center gap-1 py-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-colors text-[10px]"
+            >
+              {icon}{label}
+            </button>
+          ))}
+        </div>
       </div>
     </aside>
   )

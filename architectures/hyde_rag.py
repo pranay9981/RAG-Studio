@@ -33,16 +33,14 @@ class HyDERAGPipeline:
 
         existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        metadatas = [doc.metadata for doc in documents]
+        metadatas = [
+            {k: v for k, v in doc.metadata.items()
+             if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
+            for doc in documents
+        ]
         ids = [f"hyde_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=ids,
-        )
+        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def _generate_hypothetical_document(self, query: str) -> str:
         prompt = f"""Write a detailed, factual passage that would perfectly answer the following question.
@@ -80,6 +78,23 @@ Passage:"""
         docs = results["documents"][0]
         metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
 
+        # Self-evaluation
+        quality = services.evaluate_context(query, docs)
+        _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
+        step(f"Context quality: {_icons.get(quality, '')} {quality}")
+
+        if quality == "INCORRECT":
+            step("Insufficient context — web search fallback…")
+            web = services.web_search_fallback(query)
+            if web:
+                docs = web
+                metas = [{}] * len(docs)
+        elif quality == "AMBIGUOUS":
+            web = services.web_search_fallback(query, n=2)
+            if web:
+                docs = docs + web
+                metas = metas + [{}] * len(web)
+
         if on_step and docs:
             sources = [
                 {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
@@ -87,7 +102,10 @@ Passage:"""
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(docs)
+        context = "\n\n".join(
+            services.get_context_text(text, meta)
+            for text, meta in zip(docs, metas)
+        )
 
         step("Generating final answer from retrieved real context…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
@@ -98,4 +116,6 @@ Context:
 Query: {query}
 
 Answer:"""
-        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))
+        return services.stream_llm(
+            prompt, on_token=lambda t: on_step and on_step(("token", t))
+        )

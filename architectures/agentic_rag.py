@@ -4,7 +4,6 @@ import uuid
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
-from duckduckgo_search import DDGS
 from core.shared_services import services
 
 
@@ -58,17 +57,35 @@ class AgenticRAGPipeline:
             {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
             for text, meta in zip(docs, metas)
         ]
-        return "\n\n".join(docs) if docs else "No relevant documents found.", sources
+        context = "\n\n".join(
+            services.get_context_text(text, meta)
+            for text, meta in zip(docs, metas)
+        ) if docs else "No relevant documents found."
+        return context, sources
 
     def _web_search(self, query: str) -> str:
+        results = services.web_search_fallback(query)
+        return "\n".join(results) if results else "No web results found."
+
+    def _maybe_decompose(self, query: str) -> List[str]:
+        """For complex multi-part queries, decomposes into sub-questions."""
+        if query.count("?") <= 1 and " and " not in query.lower():
+            return [query]
+        prompt = f"""If this query requires multiple distinct pieces of information, break it into 2-3 sub-questions.
+If it is a single question, output it unchanged.
+Output only the questions, one per line, no numbering.
+
+Query: {query}
+
+Questions:"""
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=3))
-                if not results:
-                    return "No web results found."
-                return "\n".join([f"{r['title']}: {r['body']}" for r in results])
-        except Exception as e:
-            return f"Web search failed: {e}"
+            response = services.llm.invoke(prompt)
+            text = services.extract_response_text(response)
+            subs = [q.strip().lstrip("0123456789.-) ") for q in text.strip().split("\n") if q.strip()]
+            subs = [q for q in subs if len(q) > 5]
+            return subs[:3] if len(subs) > 1 else [query]
+        except Exception:
+            return [query]
 
     def planner_node(self, state: AgentState) -> Dict:
         last_msg = state["messages"][-1].content
@@ -99,18 +116,35 @@ Output ONLY the option name, nothing else."""
     def tool_executor_node(self, state: AgentState) -> Dict:
         query = state["messages"][0].content
         plan = state["plan"]
+
         if plan == "VECTOR_SEARCH":
-            if self._on_step:
-                self._on_step(("step", "Vector Search — querying ingested document…"))
-            result, sources = self._vector_search(query)
-            if self._on_step and sources:
-                self._on_step(("sources", sources))
-            tool_msg = f"__tool__vector\n{result}"
+            # Multi-hop: decompose complex queries into sub-questions
+            sub_queries = self._maybe_decompose(query)
+            if len(sub_queries) > 1:
+                if self._on_step:
+                    self._on_step(("step", f"Multi-hop query — decomposed into {len(sub_queries)} sub-questions…"))
+                all_contexts = []
+                all_sources = []
+                for sub in sub_queries:
+                    ctx, srcs = self._vector_search(sub)
+                    all_contexts.append(f"Sub-question '{sub}':\n{ctx}")
+                    all_sources.extend(srcs)
+                if self._on_step and all_sources:
+                    self._on_step(("sources", all_sources[:6]))
+                tool_msg = f"__tool__vector\n" + "\n\n---\n\n".join(all_contexts)
+            else:
+                if self._on_step:
+                    self._on_step(("step", "Vector Search — querying ingested document…"))
+                result, sources = self._vector_search(query)
+                if self._on_step and sources:
+                    self._on_step(("sources", sources))
+                tool_msg = f"__tool__vector\n{result}"
         else:
             if self._on_step:
                 self._on_step(("step", "Web Search — fetching external knowledge…"))
             result = self._web_search(query)
             tool_msg = f"__tool__web\n{result}"
+
         return {"messages": [AIMessage(content=tool_msg)]}
 
     def reasoner_node(self, state: AgentState) -> Dict:
@@ -122,6 +156,7 @@ Output ONLY the option name, nothing else."""
                 if len(raw) > 1:
                     context_parts.append(raw[1])
         context = "\n\n".join(context_parts) if context_parts else "No retrieved context available."
+
         prompt = f"""Answer the user's query using the context below.
 
 Context:
@@ -162,7 +197,11 @@ Answer directly and comprehensively:"""
 
     def query(self, query: str, on_step=None) -> str:
         self._on_step = on_step
-        initial_state = {"messages": [HumanMessage(content=query)], "plan": "", "is_sufficient": False}
+        initial_state = {
+            "messages": [HumanMessage(content=query)],
+            "plan": "",
+            "is_sufficient": False,
+        }
         trace_steps = []
         final_answer = ""
 

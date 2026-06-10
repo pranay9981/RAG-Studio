@@ -17,12 +17,13 @@ from pydantic import BaseModel
 
 from backend.session_manager import session, ARCH_KEYS, STATE_KEY_MAP, ARCH_INFO
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="RAG System API", version="2.0.0", docs_url="/docs")
+app = FastAPI(title="RAG System API", version="3.0.0", docs_url="/docs")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,7 +42,71 @@ class CompareRequest(BaseModel):
 class EvalRequest(BaseModel):
     query: str
     answer: str
+    arch_key: str = ""
     sources: List[dict] = []
+
+class FeedbackRequest(BaseModel):
+    query: str
+    arch_key: str
+    chunk_ids: List[str] = []
+    rating: int  # 1 = thumbs up, -1 = thumbs down
+    message_id: str = ""
+
+# ── Demo document ─────────────────────────────────────────────────────────────
+
+DEMO_TEXT = """# RAG System Architectures: A Comprehensive Guide
+
+## What is Retrieval-Augmented Generation (RAG)?
+
+Retrieval-Augmented Generation (RAG) is an AI framework that enhances large language models by retrieving relevant information from external knowledge bases before generating responses. Instead of relying solely on the model's training data, RAG systems dynamically fetch contextual information, making answers more accurate, up-to-date, and grounded in specific documents.
+
+The core RAG pipeline consists of three stages: Indexing (documents are chunked and converted to embeddings stored in a vector database), Retrieval (user queries are embedded and matched against stored vectors to find relevant chunks), and Generation (retrieved context is combined with the query and sent to an LLM for response).
+
+## The Eight RAG Architectures
+
+### 1. Hybrid RAG (Dense + Sparse + Re-ranking)
+
+Hybrid RAG combines two complementary retrieval strategies: dense vector search and sparse BM25 keyword matching. Dense retrieval captures semantic meaning — it finds documents conceptually related to the query even when exact words do not match. BM25 excels at exact keyword matching, ensuring specific terms are not missed. The two ranked result lists are merged using Reciprocal Rank Fusion (RRF) with a parameter k=60. A cross-encoder model (ms-marco-MiniLM-L-6-v2) then re-ranks the fused candidates by scoring each query-document pair directly. Hybrid RAG is best for general-purpose document retrieval.
+
+### 2. Graph RAG (Knowledge Graphs)
+
+Graph RAG builds a NetworkX knowledge graph by extracting entity-relationship triples from ingested documents using Gemini. Each extraction produces triples of the form: source entity, relationship, target entity. At query time, Graph RAG extracts entities from the query, traverses the knowledge graph to find connected entities and relationships, and combines this graph context with dense vector retrieval results. Graph RAG is best for documents rich in named entities and interconnected concepts such as research papers and technical reports.
+
+### 3. Agentic RAG (LangGraph Planner)
+
+Agentic RAG uses a LangGraph state machine with three nodes: Planner, Tool Executor, and Reasoner. The Planner node is a decision-making agent that analyzes the query to choose between VECTOR_SEARCH, WEB_SEARCH via DuckDuckGo, or ANSWER directly. A multi-hop extension allows Agentic RAG to decompose complex queries into sub-questions, retrieve context for each sub-question separately, and synthesize a comprehensive answer. Agentic RAG is best for queries that may need web context or multi-step reasoning.
+
+### 4. Corrective RAG (CRAG)
+
+Corrective RAG implements a 5-node LangGraph workflow: Retrieve, Evaluate, Route, optional Rewrite plus Web Search, and Generate. The key innovation is the Evaluate node which uses the LLM to judge whether retrieved documents contain sufficient information. The Evaluator classifies retrieval quality as CORRECT (sufficient context), AMBIGUOUS (partial context), or INCORRECT (insufficient context). CORRECT routes directly to generation. AMBIGUOUS triggers query rewrite followed by web search. INCORRECT bypasses original documents entirely and fetches from DuckDuckGo. CRAG is best when document coverage is uncertain.
+
+### 5. Multimodal RAG (Vision + Text)
+
+Multimodal RAG handles both text and image inputs. When an image is uploaded, Gemini Vision generates a detailed text description which is embedded and stored in ChromaDB along with the base64-encoded image in metadata. At query time it retrieves both text chunks and image chunks and sends them together to Gemini Vision. Multimodal RAG is best for documents containing charts, diagrams, screenshots, or mixed image-text content.
+
+### 6. Multilingual RAG (Cross-lingual)
+
+Multilingual RAG uses a multilingual sentence transformer that maps text from over 100 languages into a shared vector space. A query in French can retrieve documents written in English or any other supported language without explicit translation. A cross-encoder re-ranks results and Gemini generates a response in the same language as the user query. Multilingual RAG is best for multilingual document collections or when users query in different languages.
+
+### 7. RAG-Fusion (Multi-Query + RRF)
+
+RAG-Fusion generates 4 different phrasings of the original query using Gemini. Each phrasing retrieves its own ranked list from ChromaDB independently. The 4 ranked lists are merged using Reciprocal Rank Fusion — documents appearing in multiple sub-query result lists receive significantly boosted scores. RAG-Fusion is best for ambiguous, broad, or compound queries.
+
+### 8. HyDE RAG (Hypothetical Document Embeddings)
+
+HyDE RAG generates a hypothetical ideal answer first. That hypothetical is embedded, and real document chunks closest to this hypothetical embedding are retrieved. The key insight is that the vocabulary gap between questions and answers is large. By generating a hypothetical answer first, HyDE bridges this gap by searching in the answer space rather than the question space. HyDE is best for short or keyword-style queries worded very differently from the source text.
+
+## Evaluation Metrics
+
+RAG systems are evaluated on four dimensions. Faithfulness measures whether claims in the generated answer are grounded in the retrieved context, scored 0 to 10. Answer Relevance measures whether the answer directly addresses the user question, scored 0 to 10. Context Precision measures whether the retrieved chunks were relevant to the query, scored 0 to 10. Context Recall measures whether the retrieval captured all information needed to fully answer the query, scored 0 to 10.
+
+## Adaptive RAG: Learning From Interactions
+
+This system implements several adaptive mechanisms. The Semantic Query Cache stores answered queries with their embeddings. When a new query is semantically similar (cosine similarity above 0.92) to a previously answered query for the same architecture, the cached answer is returned instantly. Feedback-Driven Retrieval allows users to rate answers with thumbs up or thumbs down, which is stored for analytics and future improvements. Context Quality Evaluation checks retrieved context quality before generating any answer — if context quality is INCORRECT the pipeline falls back to web search, if AMBIGUOUS web search supplements the original context. The Analytics Dashboard tracks query counts, average latencies, eval scores, and feedback ratios per architecture.
+
+## Choosing the Right Architecture
+
+For general questions about a document use Hybrid RAG for best precision. For relationship and entity questions use Graph RAG for network context. For questions that may need web data use Agentic RAG or CRAG. For images and charts use Multimodal RAG. For non-English documents or queries use Multilingual RAG. For broad or ambiguous questions use RAG-Fusion. For short keyword queries against long documents use HyDE RAG."""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -84,7 +149,6 @@ async def process_file(file: UploadFile) -> List[Document]:
         chunks = services.text_splitter.split_text(text)
         return [Document(page_content=c, metadata={"source": source, "type": "docx"}) for c in chunks]
 
-    # Image
     b64 = base64.b64encode(content).decode("utf-8")
     msg = HumanMessage(content=[
         {"type": "text", "text": "Describe this image in detail."},
@@ -125,7 +189,6 @@ async def ingest_document(
     file: Optional[UploadFile] = File(default=None),
     url: Optional[str] = Form(default=None),
 ):
-    # Parse target architectures
     if arch_keys.strip() == "all":
         target_keys = ARCH_KEYS
     else:
@@ -135,7 +198,6 @@ async def ingest_document(
         except Exception:
             target_keys = [arch_keys.strip()]
 
-    # Build documents
     docs: List[Document] = []
     source_name = ""
 
@@ -160,7 +222,9 @@ async def ingest_document(
     if not docs:
         raise HTTPException(status_code=422, detail="No content could be extracted")
 
-    # Ingest into each target pipeline (continue on individual failures)
+    # Apply windowed chunking so each chunk carries parent context in metadata
+    docs = services.create_windowed_documents(docs, window=1)
+
     ingested: List[str] = []
     for arch_key in target_keys:
         state_key = STATE_KEY_MAP.get(arch_key)
@@ -176,8 +240,33 @@ async def ingest_document(
                 print(f"[ingest] {arch_key} failed: {exc}")
 
     session.doc_library.append({"name": source_name, "chunks": len(docs)})
-
     return {"chunks": len(docs), "source": source_name, "architectures": ingested}
+
+
+@app.post("/api/demo/load")
+async def load_demo():
+    """Ingest the built-in demo document into all 8 architectures."""
+    chunks = services.text_splitter.split_text(DEMO_TEXT)
+    docs = [
+        Document(page_content=c, metadata={"source": "RAG System Guide (Demo)", "type": "demo"})
+        for c in chunks
+    ]
+    docs = services.create_windowed_documents(docs, window=1)
+
+    ingested: List[str] = []
+    for arch_key in ARCH_KEYS:
+        state_key = STATE_KEY_MAP.get(arch_key)
+        pipeline = session.get_pipeline(state_key)
+        if pipeline:
+            try:
+                pipeline.ingest(docs)
+                session.ingested_archs.add(arch_key)
+                ingested.append(arch_key)
+            except Exception as exc:
+                print(f"[demo] {arch_key} failed: {exc}")
+
+    session.doc_library.append({"name": "RAG System Guide (Demo)", "chunks": len(docs)})
+    return {"chunks": len(docs), "source": "RAG System Guide (Demo)", "architectures": ingested}
 
 
 @app.get("/api/query")
@@ -194,8 +283,34 @@ async def query_stream(
     if not pipeline:
         raise HTTPException(status_code=400, detail="Pipeline not found")
 
+    # Check semantic cache
+    try:
+        query_embedding = services.embeddings.embed_query(query)
+        cached = adaptive_db.find_similar_query(query_embedding, arch_key)
+    except Exception:
+        cached = None
+        query_embedding = None
+
+    if cached:
+        async def cached_generator():
+            yield f'data: {json.dumps({"type": "step", "content": f"⚡ Semantic cache hit (similarity {cached[\"similarity\"]}) — reusing previous answer"})}\n\n'
+            if cached["sources"]:
+                yield f'data: {json.dumps({"type": "sources", "content": cached["sources"]})}\n\n'
+            # Stream cached answer token by token for visual continuity
+            for word in cached["answer"].split(" "):
+                yield f'data: {json.dumps({"type": "token", "content": word + " "})}\n\n'
+            yield f'data: {json.dumps({"type": "done", "answer": cached["answer"], "elapsed": 0.001, "cached": True})}\n\n'
+            adaptive_db.store_query_analytics(arch_key, query, 0.001, cached=True)
+
+        return StreamingResponse(
+            cached_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
     q: "Queue[tuple]" = Queue()
     t0 = time.time()
+    collected_sources: List[dict] = []
 
     def on_step(event):
         q.put(event)
@@ -213,12 +328,15 @@ async def query_stream(
 
     async def event_generator():
         collected_answer = ""
+        elapsed = 0.0
+
         while True:
             try:
                 event = q.get_nowait()
                 kind, content = event
 
                 if kind == "sources":
+                    collected_sources.extend(content)
                     payload = json.dumps({"type": "sources", "content": content})
                 elif kind == "token":
                     payload = json.dumps({"type": "token", "content": content})
@@ -226,7 +344,13 @@ async def query_stream(
                     payload = json.dumps({"type": "step", "content": content})
                 elif kind == "done":
                     collected_answer = content.get("answer", "")
-                    payload = json.dumps({"type": "done", "answer": collected_answer, "elapsed": content.get("elapsed", 0)})
+                    elapsed = content.get("elapsed", 0)
+                    payload = json.dumps({
+                        "type": "done",
+                        "answer": collected_answer,
+                        "elapsed": elapsed,
+                        "cached": False,
+                    })
                 elif kind == "error":
                     payload = json.dumps({"type": "error", "content": content.get("message", "Unknown error")})
                 else:
@@ -239,9 +363,19 @@ async def query_stream(
                         session.history.append({
                             "query":   query,
                             "arch":    arch_key,
-                            "elapsed": content.get("elapsed", 0),
+                            "elapsed": elapsed,
                             "answer":  collected_answer[:120],
                         })
+                        adaptive_db.store_query_analytics(arch_key, query, elapsed)
+                        # Store in semantic cache for future similar queries
+                        if collected_answer and query_embedding:
+                            try:
+                                adaptive_db.store_query_cache(
+                                    arch_key, query, query_embedding,
+                                    collected_answer, collected_sources[:5],
+                                )
+                            except Exception:
+                                pass
                     break
 
             except Empty:
@@ -253,8 +387,8 @@ async def query_stream(
         event_generator(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control":    "no-cache",
-            "Connection":       "keep-alive",
+            "Cache-Control":     "no-cache",
+            "Connection":        "keep-alive",
             "X-Accel-Buffering": "no",
         },
     )
@@ -262,26 +396,31 @@ async def query_stream(
 
 @app.post("/api/compare")
 async def compare(request: CompareRequest):
-    results = []
+    result_list = [None] * len(ARCH_KEYS)
 
-    def run_one(arch_key: str, state_key: str):
+    def run_one(i: int, arch_key: str, state_key: str):
         pipeline = session.get_pipeline(state_key)
         start = time.time()
         try:
             answer = pipeline.query(request.query)
-            return {"arch_key": arch_key, "answer": answer, "elapsed": round(time.time() - start, 3)}
+            result_list[i] = {
+                "arch_key": arch_key,
+                "answer": answer,
+                "elapsed": round(time.time() - start, 3),
+            }
         except Exception as e:
-            return {"arch_key": arch_key, "answer": "", "elapsed": round(time.time() - start, 3), "error": str(e)}
+            result_list[i] = {
+                "arch_key": arch_key,
+                "answer": "",
+                "elapsed": round(time.time() - start, 3),
+                "error": str(e),
+            }
 
     threads = []
-    result_list = [None] * len(ARCH_KEYS)
-
-    def worker(i, arch_key, state_key):
-        result_list[i] = run_one(arch_key, state_key)
-
     for i, arch_key in enumerate(ARCH_KEYS):
-        state_key = STATE_KEY_MAP[arch_key]
-        t = threading.Thread(target=worker, args=(i, arch_key, state_key), daemon=True)
+        t = threading.Thread(
+            target=run_one, args=(i, arch_key, STATE_KEY_MAP[arch_key]), daemon=True
+        )
         threads.append(t)
         t.start()
 
@@ -294,7 +433,7 @@ async def compare(request: CompareRequest):
 @app.post("/api/evaluate")
 async def evaluate_answer(request: EvalRequest):
     context = "\n".join(s.get("text", "") for s in request.sources) if request.sources else ""
-    prompt = f"""You are an expert RAG system evaluator. Score the answer on three dimensions.
+    prompt = f"""You are an expert RAG system evaluator. Score the answer on four dimensions.
 
 Question: {request.query}
 Retrieved Context (first 1500 chars): {context[:1500] if context else "N/A"}
@@ -304,19 +443,48 @@ Score each 0-10:
 1. Faithfulness: Is the answer grounded in the context? (0=hallucinated, 10=fully supported)
 2. Relevance: Does the answer directly address the question? (0=off-topic, 10=perfectly on-point)
 3. Context Precision: Were the right chunks retrieved? (0=irrelevant, 10=perfect)
+4. Context Recall: Did the context contain all info needed to fully answer? (0=missing key info, 10=complete)
 
-Output ONLY valid JSON: {{"faithfulness": X, "relevance": X, "context_precision": X}}"""
+Output ONLY valid JSON: {{"faithfulness": X, "relevance": X, "context_precision": X, "context_recall": X}}"""
 
+    scores = {"faithfulness": 5, "relevance": 5, "context_precision": 5, "context_recall": 5}
     try:
         response = services.llm.invoke(prompt)
         text = services.extract_response_text(response)
         m = re.search(r"\{[^}]+\}", text)
         if m:
             raw = json.loads(m.group())
-            return {k: max(0, min(10, int(raw.get(k, 5)))) for k in ("faithfulness", "relevance", "context_precision")}
+            keys = ("faithfulness", "relevance", "context_precision", "context_recall")
+            scores = {k: max(0, min(10, int(raw.get(k, 5)))) for k in keys}
     except Exception:
         pass
-    return {"faithfulness": 5, "relevance": 5, "context_precision": 5}
+
+    # Store eval analytics if arch_key provided
+    if request.arch_key:
+        try:
+            adaptive_db.store_eval_analytics(request.arch_key, request.query, scores)
+        except Exception:
+            pass
+
+    return scores
+
+
+@app.post("/api/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    if request.rating not in (1, -1):
+        raise HTTPException(status_code=400, detail="Rating must be 1 (up) or -1 (down)")
+    adaptive_db.store_feedback(
+        request.query, request.arch_key, request.chunk_ids, request.rating
+    )
+    return {"status": "ok"}
+
+
+@app.get("/api/analytics")
+async def get_analytics():
+    return {
+        "data": adaptive_db.get_analytics(),
+        "recent": adaptive_db.get_recent_queries(20),
+    }
 
 
 @app.get("/api/graph")

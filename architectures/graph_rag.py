@@ -57,11 +57,11 @@ Text:
         texts = [doc.page_content for doc in documents]
         ids = [f"graph_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
         metadatas = [
-            {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
+            {k: v for k, v in doc.metadata.items()
+             if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
             for doc in documents
         ]
         embeddings = services.embeddings.embed_documents(texts)
-
         self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
         for doc in documents:
@@ -83,8 +83,7 @@ Query: {query}"""
 
     def render_graph_html(self, max_nodes: int = 80) -> str:
         from pyvis.network import Network
-        import tempfile
-        import os
+        import tempfile, os
 
         if not self.graph.nodes():
             return ""
@@ -92,34 +91,35 @@ Query: {query}"""
         net = Network(
             height="520px", width="100%",
             bgcolor="#0e1117", font_color="white",
-            directed=True,
-            notebook=False,
+            directed=True, notebook=False,
         )
         net.set_options("""
         {
           "physics": {
-            "forceAtlas2Based": {
-              "gravitationalConstant": -50,
-              "springLength": 120
-            },
+            "forceAtlas2Based": {"gravitationalConstant": -50, "springLength": 120},
             "solver": "forceAtlas2Based",
-            "stabilization": { "iterations": 100 }
+            "stabilization": {"iterations": 100}
           },
           "edges": {
-            "color": { "color": "#4a9eff" },
-            "smooth": { "type": "curvedCW", "roundness": 0.15 }
+            "color": {"color": "#4a9eff"},
+            "smooth": {"type": "curvedCW", "roundness": 0.15}
           }
         }
         """)
 
-        sorted_nodes = sorted(self.graph.nodes(), key=lambda n: self.graph.degree(n), reverse=True)
+        sorted_nodes = sorted(
+            self.graph.nodes(), key=lambda n: self.graph.degree(n), reverse=True
+        )
         nodes_to_show = set(sorted_nodes[:max_nodes])
 
         for node in nodes_to_show:
             degree = self.graph.degree(node)
             size = max(12, min(40, 12 + degree * 4))
             color = "#4a9eff" if degree > 2 else "#a0c4ff"
-            net.add_node(str(node), label=str(node), title=f"{node}\n{degree} connection(s)", size=size, color=color)
+            net.add_node(
+                str(node), label=str(node),
+                title=f"{node}\n{degree} connection(s)", size=size, color=color,
+            )
 
         for u, v, data in self.graph.edges(data=True):
             if u in nodes_to_show and v in nodes_to_show:
@@ -155,7 +155,7 @@ Query: {query}"""
                         subgraph_lines.append(f"{node} --[{rel}]--> {neighbor}")
         graph_text = "\n".join(set(subgraph_lines))
 
-        step("Dense retrieval from ChromaDB (fallback)…")
+        step("Dense retrieval from ChromaDB…")
         query_embedding = services.embeddings.embed_query(query)
         n = min(4, self.collection.count())
         dense_response = self.collection.query(
@@ -165,7 +165,23 @@ Query: {query}"""
         )
         dense_docs = dense_response["documents"][0] if dense_response["documents"][0] else []
         dense_metas = dense_response["metadatas"][0] if dense_response["metadatas"] else [{}] * len(dense_docs)
-        vector_text = "\n\n".join(dense_docs)
+
+        # Self-evaluation
+        quality = services.evaluate_context(query, dense_docs)
+        _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
+        step(f"Context quality: {_icons.get(quality, '')} {quality}")
+
+        if quality == "INCORRECT":
+            step("Insufficient context — web search fallback…")
+            web = services.web_search_fallback(query)
+            if web:
+                dense_docs = web
+                dense_metas = [{}] * len(dense_docs)
+        elif quality == "AMBIGUOUS":
+            web = services.web_search_fallback(query, n=2)
+            if web:
+                dense_docs = dense_docs + web
+                dense_metas = dense_metas + [{}] * len(web)
 
         if on_step and dense_docs:
             sources = [
@@ -173,6 +189,11 @@ Query: {query}"""
                 for text, meta in zip(dense_docs, dense_metas)
             ]
             on_step(("sources", sources))
+
+        vector_text = "\n\n".join(
+            services.get_context_text(text, meta)
+            for text, meta in zip(dense_docs, dense_metas)
+        )
 
         prompt = f"""You are GraphRAG. Answer the user's query using the Knowledge Graph relationships and semantic text below.
 
@@ -187,4 +208,6 @@ Query: {query}
 Answer:"""
 
         step("Generating answer with Gemini…")
-        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))
+        return services.stream_llm(
+            prompt, on_token=lambda t: on_step and on_step(("token", t))
+        )

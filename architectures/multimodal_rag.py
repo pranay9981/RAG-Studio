@@ -28,20 +28,12 @@ class MultimodalRAGPipeline:
         existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
         ids = [f"multi_mod_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
-
-        metadatas = []
-        for doc in documents:
-            safe_meta = {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool))}
-            metadatas.append(safe_meta)
-
+        metadatas = [
+            {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool))}
+            for doc in documents
+        ]
         embeddings = services.embeddings.embed_documents(texts)
-
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=ids,
-        )
+        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def query(self, query: str, on_step=None) -> str:
         def step(msg):
@@ -73,15 +65,20 @@ class MultimodalRAGPipeline:
 
         step("Building multimodal message (text + images)…")
         content = [
-            {"type": "text", "text": f"Answer the user query using the following retrieved context. Query: {query}\n\nContext:"}
+            {
+                "type": "text",
+                "text": f"Answer the user query using the following retrieved context. Query: {query}\n\nContext:",
+            }
         ]
 
         for idx, (doc_text, meta) in enumerate(zip(docs, metadatas)):
-            content.append({"type": "text", "text": f"--- Document {idx + 1} ---\n{doc_text}\n"})
+            # Use window_text for richer context when available
+            ctx_text = services.get_context_text(doc_text, meta)
+            content.append({"type": "text", "text": f"--- Document {idx + 1} ---\n{ctx_text}\n"})
             if meta and "image_base64" in meta:
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{meta['image_base64']}"}
+                    "image_url": {"url": f"data:image/jpeg;base64,{meta['image_base64']}"},
                 })
 
         message = HumanMessage(content=content)

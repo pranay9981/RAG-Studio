@@ -28,17 +28,12 @@ class MultilingualRAGPipeline:
         texts = [doc.page_content for doc in documents]
         ids = [f"multi_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
         metadatas = [
-            {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
+            {k: v for k, v in doc.metadata.items()
+             if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
             for doc in documents
         ]
         embeddings = services.multilingual_embeddings.embed_documents(texts)
-
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=ids,
-        )
+        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def query(self, query: str, on_step=None) -> str:
         def step(msg):
@@ -65,10 +60,24 @@ class MultilingualRAGPipeline:
         scored = services.rerank(query, docs, top_n=4)
         reranked_texts = [text for _, text in scored]
 
-        src_map = {}
-        for doc, meta in zip(docs, metas):
-            src_map[doc] = (meta or {}).get("source", "Unknown")
+        # Self-evaluation
+        quality = services.evaluate_context(query, reranked_texts)
+        _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
+        step(f"Context quality: {_icons.get(quality, '')} {quality}")
 
+        if quality == "INCORRECT":
+            step("Insufficient context — web search fallback…")
+            web = services.web_search_fallback(query)
+            if web:
+                reranked_texts = web
+                metas = [{}] * len(reranked_texts)
+        elif quality == "AMBIGUOUS":
+            web = services.web_search_fallback(query, n=2)
+            if web:
+                reranked_texts = reranked_texts + web
+                metas = metas + [{}] * len(web)
+
+        src_map = {doc: (meta or {}).get("source", "Unknown") for doc, meta in zip(docs, metas)}
         if on_step:
             sources = [
                 {"text": text[:300], "source": src_map.get(text, "Unknown"), "score": round(score, 3)}
@@ -76,7 +85,12 @@ class MultilingualRAGPipeline:
             ]
             on_step(("sources", sources))
 
-        context = "\n\n".join(reranked_texts)
+        # Build context using window_text where available
+        meta_map = {doc: meta for doc, meta in zip(docs, metas)}
+        context = "\n\n".join(
+            services.get_context_text(t, meta_map.get(t, {}))
+            for t in reranked_texts
+        )
 
         prompt = f"""You are a helpful Multilingual Assistant.
 Answer the user's query in the same language as the query, using ONLY the following context.
@@ -89,4 +103,6 @@ Query: {query}
 Answer:"""
 
         step("Generating answer in query language…")
-        return services.stream_llm(prompt, on_token=lambda t: on_step and on_step(("token", t)))
+        return services.stream_llm(
+            prompt, on_token=lambda t: on_step and on_step(("token", t))
+        )
