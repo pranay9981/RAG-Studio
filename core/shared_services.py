@@ -22,6 +22,12 @@ class SharedServices:
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         self.multilingual_embeddings = self.embeddings
         self.chroma_client = self._init_chroma_client()
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, chunk_overlap=200
+        )
+        self.child_text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=300, chunk_overlap=50
+        )
 
     def _init_chroma_client(self):
         """PersistentClient with safe migration — wipes directory on HNSW corruption and retries."""
@@ -41,12 +47,6 @@ class SharedServices:
                     print(f"[chroma] retry failed ({e}) — falling back to EphemeralClient")
                     return chromadb.EphemeralClient()
         return chromadb.EphemeralClient()
-        self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200
-        )
-        self.child_text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300, chunk_overlap=50
-        )
 
     # ── Document loading ──────────────────────────────────────────────────────
 

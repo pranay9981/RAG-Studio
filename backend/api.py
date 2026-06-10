@@ -58,62 +58,6 @@ class DeleteDocumentRequest(BaseModel):
 class ApiKeyRequest(BaseModel):
     api_key: str
 
-# ── Demo document ─────────────────────────────────────────────────────────────
-
-DEMO_TEXT = """# RAG System Architectures: A Comprehensive Guide
-
-## What is Retrieval-Augmented Generation (RAG)?
-
-Retrieval-Augmented Generation (RAG) is an AI framework that enhances large language models by retrieving relevant information from external knowledge bases before generating responses. Instead of relying solely on the model's training data, RAG systems dynamically fetch contextual information, making answers more accurate, up-to-date, and grounded in specific documents.
-
-The core RAG pipeline consists of three stages: Indexing (documents are chunked and converted to embeddings stored in a vector database), Retrieval (user queries are embedded and matched against stored vectors to find relevant chunks), and Generation (retrieved context is combined with the query and sent to an LLM for response).
-
-## The Eight RAG Architectures
-
-### 1. Hybrid RAG (Dense + Sparse + Re-ranking)
-
-Hybrid RAG combines two complementary retrieval strategies: dense vector search and sparse BM25 keyword matching. Dense retrieval captures semantic meaning — it finds documents conceptually related to the query even when exact words do not match. BM25 excels at exact keyword matching, ensuring specific terms are not missed. The two ranked result lists are merged using Reciprocal Rank Fusion (RRF) with a parameter k=60. A cross-encoder model (ms-marco-MiniLM-L-6-v2) then re-ranks the fused candidates by scoring each query-document pair directly. Hybrid RAG is best for general-purpose document retrieval.
-
-### 2. Graph RAG (Knowledge Graphs)
-
-Graph RAG builds a NetworkX knowledge graph by extracting entity-relationship triples from ingested documents using Gemini. Each extraction produces triples of the form: source entity, relationship, target entity. At query time, Graph RAG extracts entities from the query, traverses the knowledge graph to find connected entities and relationships, and combines this graph context with dense vector retrieval results. Graph RAG is best for documents rich in named entities and interconnected concepts such as research papers and technical reports.
-
-### 3. Agentic RAG (LangGraph Planner)
-
-Agentic RAG uses a LangGraph state machine with three nodes: Planner, Tool Executor, and Reasoner. The Planner node is a decision-making agent that analyzes the query to choose between VECTOR_SEARCH, WEB_SEARCH via DuckDuckGo, or ANSWER directly. A multi-hop extension allows Agentic RAG to decompose complex queries into sub-questions, retrieve context for each sub-question separately, and synthesize a comprehensive answer. Agentic RAG is best for queries that may need web context or multi-step reasoning.
-
-### 4. Corrective RAG (CRAG)
-
-Corrective RAG implements a 5-node LangGraph workflow: Retrieve, Evaluate, Route, optional Rewrite plus Web Search, and Generate. The key innovation is the Evaluate node which uses the LLM to judge whether retrieved documents contain sufficient information. The Evaluator classifies retrieval quality as CORRECT (sufficient context), AMBIGUOUS (partial context), or INCORRECT (insufficient context). CORRECT routes directly to generation. AMBIGUOUS triggers query rewrite followed by web search. INCORRECT bypasses original documents entirely and fetches from DuckDuckGo. CRAG is best when document coverage is uncertain.
-
-### 5. Multimodal RAG (Vision + Text)
-
-Multimodal RAG handles both text and image inputs. When an image is uploaded, Gemini Vision generates a detailed text description which is embedded and stored in ChromaDB along with the base64-encoded image in metadata. At query time it retrieves both text chunks and image chunks and sends them together to Gemini Vision. Multimodal RAG is best for documents containing charts, diagrams, screenshots, or mixed image-text content.
-
-### 6. Multilingual RAG (Cross-lingual)
-
-Multilingual RAG uses a multilingual sentence transformer that maps text from over 100 languages into a shared vector space. A query in French can retrieve documents written in English or any other supported language without explicit translation. A cross-encoder re-ranks results and Gemini generates a response in the same language as the user query. Multilingual RAG is best for multilingual document collections or when users query in different languages.
-
-### 7. RAG-Fusion (Multi-Query + RRF)
-
-RAG-Fusion generates 4 different phrasings of the original query using Gemini. Each phrasing retrieves its own ranked list from ChromaDB independently. The 4 ranked lists are merged using Reciprocal Rank Fusion — documents appearing in multiple sub-query result lists receive significantly boosted scores. RAG-Fusion is best for ambiguous, broad, or compound queries.
-
-### 8. HyDE RAG (Hypothetical Document Embeddings)
-
-HyDE RAG generates a hypothetical ideal answer first. That hypothetical is embedded, and real document chunks closest to this hypothetical embedding are retrieved. The key insight is that the vocabulary gap between questions and answers is large. By generating a hypothetical answer first, HyDE bridges this gap by searching in the answer space rather than the question space. HyDE is best for short or keyword-style queries worded very differently from the source text.
-
-## Evaluation Metrics
-
-RAG systems are evaluated on four dimensions. Faithfulness measures whether claims in the generated answer are grounded in the retrieved context, scored 0 to 10. Answer Relevance measures whether the answer directly addresses the user question, scored 0 to 10. Context Precision measures whether the retrieved chunks were relevant to the query, scored 0 to 10. Context Recall measures whether the retrieval captured all information needed to fully answer the query, scored 0 to 10.
-
-## Adaptive RAG: Learning From Interactions
-
-This system implements several adaptive mechanisms. The Semantic Query Cache stores answered queries with their embeddings. When a new query is semantically similar (cosine similarity above 0.92) to a previously answered query for the same architecture, the cached answer is returned instantly. Feedback-Driven Retrieval allows users to rate answers with thumbs up or thumbs down, which is stored for analytics and future improvements. Context Quality Evaluation checks retrieved context quality before generating any answer — if context quality is INCORRECT the pipeline falls back to web search, if AMBIGUOUS web search supplements the original context. The Analytics Dashboard tracks query counts, average latencies, eval scores, and feedback ratios per architecture.
-
-## Choosing the Right Architecture
-
-For general questions about a document use Hybrid RAG for best precision. For relationship and entity questions use Graph RAG for network context. For questions that may need web data use Agentic RAG or CRAG. For images and charts use Multimodal RAG. For non-English documents or queries use Multilingual RAG. For broad or ambiguous questions use RAG-Fusion. For short keyword queries against long documents use HyDE RAG."""
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def fetch_url_text(url: str) -> str:
@@ -288,32 +232,6 @@ async def ingest_document(
 
     session.doc_library.append({"name": source_name, "chunks": len(docs)})
     return {"chunks": len(docs), "source": source_name, "architectures": ingested}
-
-
-@app.post("/api/demo/load")
-async def load_demo():
-    """Ingest the built-in demo document into all 8 architectures."""
-    chunks = services.text_splitter.split_text(DEMO_TEXT)
-    docs = [
-        Document(page_content=c, metadata={"source": "RAG System Guide (Demo)", "type": "demo"})
-        for c in chunks
-    ]
-    docs = services.create_parent_child_documents(docs)
-
-    ingested: List[str] = []
-    for arch_key in ARCH_KEYS:
-        state_key = STATE_KEY_MAP.get(arch_key)
-        pipeline = session.get_pipeline(state_key)
-        if pipeline:
-            try:
-                pipeline.ingest(docs)
-                session.ingested_archs.add(arch_key)
-                ingested.append(arch_key)
-            except Exception as exc:
-                print(f"[demo] {arch_key} failed: {exc}")
-
-    session.doc_library.append({"name": "RAG System Guide (Demo)", "chunks": len(docs)})
-    return {"chunks": len(docs), "source": "RAG System Guide (Demo)", "architectures": ingested}
 
 
 @app.get("/api/query")

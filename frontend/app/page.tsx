@@ -13,7 +13,7 @@ import AnalyticsDashboard from '@/components/AnalyticsDashboard'
 import ArchExplainer from '@/components/ArchExplainer'
 import {
   getArchitectures, streamQuery, compareAll, evaluateAnswer,
-  resetSession, getGraphHtml, submitFeedback, loadDemo, getAnalytics, getConfigStatus,
+  resetSession, getGraphHtml, submitFeedback, getAnalytics, getConfigStatus,
 } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
@@ -46,7 +46,6 @@ export default function Page() {
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null)
   const [showExplainer, setShowExplainer] = useState(false)
-  const [demoLoading, setDemoLoading] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -108,20 +107,6 @@ export default function Page() {
       setShowAnalytics(true)
     } catch {}
   }, [])
-
-  const handleLoadDemo = useCallback(async () => {
-    if (demoLoading) return
-    setDemoLoading(true)
-    try {
-      const result = await loadDemo()
-      setDocLibrary(prev => [...prev, { name: result.source, chunks: result.chunks }])
-      setIngestedArchs(new Set(result.architectures))
-    } catch (e) {
-      console.error('Demo load failed', e)
-    } finally {
-      setDemoLoading(false)
-    }
-  }, [demoLoading])
 
   const handleFeedback = useCallback(async (messageId: string, rating: number) => {
     const msgs = allMessages[chatKey] ?? []
@@ -272,7 +257,6 @@ export default function Page() {
         onReset={handleReset}
         onExport={handleExport}
         onAnalytics={handleOpenAnalytics}
-        onDemo={handleLoadDemo}
         onSettings={() => setShowApiKey(true)}
       >
         <DocumentManager
@@ -325,8 +309,8 @@ export default function Page() {
               <p className="text-lg font-semibold text-slate-300">RAG Studio</p>
               <p className="text-sm text-slate-500 max-w-sm">
                 {compareMode
-                  ? 'Upload a document or load the demo, then ask a question to compare all 8 architectures.'
-                  : `Click "Load Demo Document" in the sidebar, or upload your own file, then start asking questions.`}
+                  ? 'Upload a document, then ask a question to compare all architectures side by side.'
+                  : 'Upload a PDF, TXT, CSV, DOCX, image, or paste a URL — then start asking questions.'}
               </p>
             </div>
           )}
@@ -369,9 +353,9 @@ export default function Page() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               placeholder={
-                demoLoading ? 'Loading demo document…'
-                : ingestedArchs.size === 0 ? 'Upload a document or load the demo first…'
-                : 'Ask a question… (Enter to send, Shift+Enter for newline)'
+                ingestedArchs.size === 0
+                  ? 'Upload a document first…'
+                  : 'Ask a question… (Enter to send, Shift+Enter for newline)'
               }
               rows={1}
               className="flex-1 resize-none bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/40 transition-colors leading-relaxed"
@@ -379,7 +363,7 @@ export default function Page() {
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming || compareLoading || demoLoading}
+              disabled={!input.trim() || isStreaming || compareLoading}
               className="flex-shrink-0 w-10 h-10 rounded-xl bg-indigo-500 hover:bg-accent-h disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
             >
               {isStreaming || compareLoading

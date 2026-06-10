@@ -36,12 +36,6 @@ export async function ingestUrl(url: string, archKeys: string[], sessionId = 'de
   return r.json()
 }
 
-export async function loadDemo(): Promise<{ chunks: number; source: string; architectures: string[] }> {
-  const r = await fetch(`${BASE}/api/demo/load`, { method: 'POST' })
-  if (!r.ok) throw new Error('Demo load failed')
-  return r.json()
-}
-
 export function streamQuery(
   query: string,
   archKey: string,

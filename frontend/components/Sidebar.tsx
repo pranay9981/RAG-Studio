@@ -1,5 +1,5 @@
 'use client'
-import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Sparkles, Key } from 'lucide-react'
+import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Key } from 'lucide-react'
 import { useState } from 'react'
 import type { ArchInfo, DocItem, HistoryItem } from '@/lib/types'
 
@@ -19,7 +19,6 @@ interface Props {
   onReset: () => void
   onExport: () => void
   onAnalytics: () => void
-  onDemo: () => void
   onSettings: () => void
   children: React.ReactNode
 }
@@ -28,7 +27,7 @@ export default function Sidebar({
   architectures, selectedArch, compareMode, enableEval, ingestedArchs,
   messageCounts, docLibrary, history,
   onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport,
-  onAnalytics, onDemo, onSettings, children,
+  onAnalytics, onSettings, children,
 }: Props) {
   const [histOpen, setHistOpen] = useState(false)
 
@@ -39,17 +38,6 @@ export default function Sidebar({
         <div className="w-6 h-6 rounded bg-indigo-500/20 flex items-center justify-center text-xs">⚡</div>
         <span className="text-sm font-semibold text-white/90 tracking-tight">RAG Studio</span>
         <span className="ml-auto text-[10px] font-mono text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded">v3</span>
-      </div>
-
-      {/* Demo loader */}
-      <div className="px-3 py-2.5 border-b border-white/[0.06]">
-        <button
-          onClick={onDemo}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-medium hover:bg-indigo-500/15 transition-colors"
-        >
-          <Sparkles size={12} />
-          Load Demo Document
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto">
