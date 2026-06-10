@@ -14,13 +14,19 @@ import { v4 as uuidv4 } from 'uuid'
 
 const SESSION_ID = 'default'
 const GRAPH_ARCH = '02 Graph RAG (Knowledge Graphs)'
+const COMPARE_KEY = '__compare__'
 
 export default function Page() {
   const [archs, setArchs] = useState<ArchInfo[]>([])
   const [selectedArch, setSelectedArch] = useState('')
   const [compareMode, setCompareMode] = useState(false)
   const [enableEval, setEnableEval] = useState(false)
-  const [messages, setMessages] = useState<Msg[]>([])
+
+  // Per-architecture chat threads keyed by arch key (or COMPARE_KEY)
+  const [allMessages, setAllMessages] = useState<Record<string, Msg[]>>({})
+  // Per-architecture compare results
+  const [allCompareResults, setAllCompareResults] = useState<Record<string, CompareResult[]>>({})
+
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [steps, setSteps] = useState<string[]>([])
@@ -29,7 +35,6 @@ export default function Page() {
   const [ingestedArchs, setIngestedArchs] = useState<Set<string>>(new Set())
   const [docLibrary, setDocLibrary] = useState<DocItem[]>([])
   const [history, setHistory] = useState<HistoryItem[]>([])
-  const [compareResults, setCompareResults] = useState<CompareResult[]>([])
   const [compareLoading, setCompareLoading] = useState(false)
   const [graphHtml, setGraphHtml] = useState('')
   const [showGraph, setShowGraph] = useState(false)
@@ -43,7 +48,22 @@ export default function Page() {
     })
   }, [])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, tokens, steps, compareResults])
+  // Current thread key
+  const chatKey = compareMode ? COMPARE_KEY : selectedArch
+  const currentMessages = allMessages[chatKey] ?? []
+  const currentCompareResults = allCompareResults[chatKey] ?? []
+
+  // Message counts per arch (assistant messages only) for sidebar badge
+  const messageCounts: Record<string, number> = {}
+  for (const [k, msgs] of Object.entries(allMessages)) {
+    messageCounts[k] = msgs.filter(m => m.role === 'assistant').length
+  }
+
+  const appendMsg = useCallback((key: string, msg: Msg) => {
+    setAllMessages(prev => ({ ...prev, [key]: [...(prev[key] ?? []), msg] }))
+  }, [])
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [currentMessages, tokens, steps, currentCompareResults])
 
   const currentArch = archs.find(a => a.key === selectedArch)
 
@@ -58,17 +78,19 @@ export default function Page() {
     if (!q || isStreaming) return
     setInput('')
 
+    const key = compareMode ? COMPARE_KEY : selectedArch
     const userMsg: Msg = { id: uuidv4(), role: 'user', content: q }
-    setMessages(prev => [...prev, userMsg])
+    appendMsg(key, userMsg)
 
     if (compareMode) {
       setCompareLoading(true)
-      setCompareResults([])
+      setAllCompareResults(prev => ({ ...prev, [key]: [] }))
       try {
         const results = await compareAll(q, SESSION_ID)
+        let final = results
 
         if (enableEval) {
-          const withEval = await Promise.all(
+          final = await Promise.all(
             results.map(async r => {
               if (r.error || !r.answer) return r
               try {
@@ -77,11 +99,9 @@ export default function Page() {
               } catch { return r }
             })
           )
-          setCompareResults(withEval)
-        } else {
-          setCompareResults(results)
         }
 
+        setAllCompareResults(prev => ({ ...prev, [key]: final }))
         setHistory(prev => [...prev, {
           query: q,
           arch: 'Compare All',
@@ -97,24 +117,18 @@ export default function Page() {
     setTokens('')
     setLiveSource([])
 
-    let finalAnswer = ''
-    let elapsed = 0
     let collectedSources: Source[] = []
 
     cleanupRef.current = streamQuery(q, selectedArch, SESSION_ID, {
       onStep: s => setSteps(prev => [...prev, s]),
       onToken: t => setTokens(prev => prev + t),
       onSources: s => { collectedSources = s; setLiveSource(s) },
-      onDone: async (answer, el) => {
-        finalAnswer = answer
-        elapsed = el
+      onDone: async (answer, elapsed) => {
         let evalScore: EvalScore | undefined
-
         if (enableEval && answer) {
           try { evalScore = await evaluateAnswer(q, answer, collectedSources) } catch {}
         }
-
-        const assistantMsg: Msg = {
+        appendMsg(selectedArch, {
           id: uuidv4(),
           role: 'assistant',
           content: answer || tokens,
@@ -122,8 +136,7 @@ export default function Page() {
           elapsed,
           sources: collectedSources,
           eval: evalScore,
-        }
-        setMessages(prev => [...prev, assistantMsg])
+        })
         setHistory(prev => [...prev, { query: q, arch: selectedArch, elapsed, answer: answer.slice(0, 120) }])
         setIsStreaming(false)
         setSteps([])
@@ -131,33 +144,41 @@ export default function Page() {
         setLiveSource([])
       },
       onError: err => {
-        setMessages(prev => [...prev, { id: uuidv4(), role: 'assistant', content: `⚠️ ${err}`, arch: selectedArch }])
+        appendMsg(selectedArch, { id: uuidv4(), role: 'assistant', content: `⚠️ ${err}`, arch: selectedArch })
         setIsStreaming(false)
         setSteps([])
         setTokens('')
       },
     })
-  }, [input, isStreaming, compareMode, selectedArch, enableEval, tokens])
+  }, [input, isStreaming, compareMode, selectedArch, enableEval, tokens, appendMsg])
+
+  const handleClearChat = () => {
+    setAllMessages(prev => ({ ...prev, [chatKey]: [] }))
+    setAllCompareResults(prev => ({ ...prev, [chatKey]: [] }))
+  }
 
   const handleReset = async () => {
     await resetSession(SESSION_ID)
-    setMessages([])
+    setAllMessages({})
+    setAllCompareResults({})
     setIngestedArchs(new Set())
     setDocLibrary([])
     setHistory([])
-    setCompareResults([])
     setGraphHtml('')
   }
 
   const handleExport = () => {
-    const md = messages.map(m => `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n${m.content}`).join('\n\n---\n\n')
+    const md = currentMessages
+      .map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
+      .join('\n\n---\n\n')
     const a = document.createElement('a')
     a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
-    a.download = 'rag-chat.md'
+    a.download = `rag-chat-${compareMode ? 'compare' : selectedArch.slice(0, 20)}.md`
     a.click()
   }
 
   const showGraphBtn = selectedArch === GRAPH_ARCH && ingestedArchs.has(GRAPH_ARCH) && !compareMode
+  const isEmpty = currentMessages.length === 0 && !isStreaming && currentCompareResults.length === 0
 
   return (
     <div className="flex h-screen bg-base overflow-hidden">
@@ -167,12 +188,13 @@ export default function Page() {
         compareMode={compareMode}
         enableEval={enableEval}
         ingestedArchs={ingestedArchs}
+        messageCounts={messageCounts}
         docLibrary={docLibrary}
         history={history}
-        onSelectArch={setSelectedArch}
+        onSelectArch={k => { if (!isStreaming) setSelectedArch(k) }}
         onCompareToggle={() => setCompareMode(o => !o)}
         onEvalToggle={() => setEnableEval(o => !o)}
-        onClearChat={() => { setMessages([]); setCompareResults([]) }}
+        onClearChat={handleClearChat}
         onReset={handleReset}
         onExport={handleExport}
       >
@@ -186,7 +208,7 @@ export default function Page() {
       </Sidebar>
 
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Arch info card or compare header */}
+        {/* Header */}
         {currentArch && !compareMode && (
           <div className="flex items-center justify-between pr-4">
             <ArchCard arch={currentArch} />
@@ -207,17 +229,21 @@ export default function Page() {
           </div>
         )}
 
-        {/* Messages */}
+        {/* Chat area */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
-          {messages.length === 0 && !isStreaming && compareResults.length === 0 && (
+          {isEmpty && (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
               <p className="text-4xl">⚡</p>
               <p className="text-lg font-semibold text-slate-300">RAG Studio</p>
-              <p className="text-sm text-slate-500 max-w-sm">Upload a document, then ask a question. Switch between 8 RAG architectures to compare how each one answers.</p>
+              <p className="text-sm text-slate-500 max-w-sm">
+                {compareMode
+                  ? 'Upload a document, then ask a question to compare all 8 architectures.'
+                  : `Upload a document, then ask ${currentArch?.label || 'this architecture'} a question.`}
+              </p>
             </div>
           )}
 
-          {messages.map(msg => (
+          {currentMessages.map(msg => (
             <ChatMessage key={msg.id} message={msg} archIcon={archs.find(a => a.key === msg.arch)?.icon} />
           ))}
 
@@ -228,10 +254,12 @@ export default function Page() {
             </div>
           )}
 
-          {compareResults.length > 0 && (
+          {currentCompareResults.length > 0 && (
             <div className="animate-fade-in">
-              <p className="text-xs text-slate-500 mb-3">Results for: <span className="text-slate-300">{messages[messages.length - 1]?.content}</span></p>
-              <CompareGrid results={compareResults} architectures={archs} loading={false} />
+              <p className="text-xs text-slate-500 mb-3">
+                Results for: <span className="text-slate-300">{currentMessages.filter(m => m.role === 'user').slice(-1)[0]?.content}</span>
+              </p>
+              <CompareGrid results={currentCompareResults} architectures={archs} loading={false} />
             </div>
           )}
 
@@ -247,7 +275,7 @@ export default function Page() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              placeholder={ingestedArchs.size === 0 ? 'Upload a document first, then ask a question…' : 'Ask a question… (Enter to send, Shift+Enter for newline)'}
+              placeholder={ingestedArchs.size === 0 ? 'Upload a document first…' : 'Ask a question… (Enter to send, Shift+Enter for newline)'}
               rows={1}
               className="flex-1 resize-none bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/40 transition-colors leading-relaxed"
               style={{ maxHeight: '120px', overflowY: 'auto' }}

@@ -9,6 +9,7 @@ interface Props {
   compareMode: boolean
   enableEval: boolean
   ingestedArchs: Set<string>
+  messageCounts: Record<string, number>
   docLibrary: DocItem[]
   history: HistoryItem[]
   onSelectArch: (k: string) => void
@@ -20,7 +21,7 @@ interface Props {
   children: React.ReactNode // DocumentManager slot
 }
 
-export default function Sidebar({ architectures, selectedArch, compareMode, enableEval, ingestedArchs, docLibrary, history, onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport, children }: Props) {
+export default function Sidebar({ architectures, selectedArch, compareMode, enableEval, ingestedArchs, messageCounts, docLibrary, history, onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport, children }: Props) {
   const [histOpen, setHistOpen] = useState(false)
 
   return (
@@ -44,8 +45,15 @@ export default function Sidebar({ architectures, selectedArch, compareMode, enab
                 className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all text-xs ${selectedArch === a.key ? 'bg-indigo-500/15 border border-indigo-500/25 text-indigo-200' : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border border-transparent'}`}
               >
                 <span className="text-sm flex-shrink-0">{a.icon}</span>
-                <span className="truncate">{a.key}</span>
-                {ingestedArchs.has(a.key) && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />}
+                <span className="truncate flex-1">{a.key}</span>
+                <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+                  {(messageCounts[a.key] ?? 0) > 0 && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/20">
+                      {messageCounts[a.key]}
+                    </span>
+                  )}
+                  {ingestedArchs.has(a.key) && <span className="w-1.5 h-1.5 rounded-full bg-green-400" />}
+                </div>
               </button>
             ))}
           </div>
