@@ -46,7 +46,7 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
               <Key size={15} className="text-indigo-400" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white">Configure Gemini API Key</h2>
+              <h2 className="text-sm font-semibold text-white">Configure Groq API Key</h2>
               <p className="text-[11px] text-slate-500 mt-0.5">Required to query any RAG architecture</p>
             </div>
           </div>
@@ -62,7 +62,7 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
           {/* Key input */}
           <div>
             <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-1.5 block">
-              Google AI Studio API Key
+              Groq API Key
             </label>
             <div className="relative">
               <input
@@ -70,7 +70,7 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
                 value={key}
                 onChange={e => setKey(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleSave()}
-                placeholder="AIzaSy..."
+                placeholder="gsk_..."
                 className="w-full text-sm bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-2.5 pr-16 text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/40 transition-colors font-mono"
               />
               <button
@@ -84,13 +84,13 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
 
           {/* Get key link */}
           <a
-            href="https://aistudio.google.com/app/apikey"
+            href="https://console.groq.com/keys"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors w-fit"
           >
             <ExternalLink size={11} />
-            Get a free key from Google AI Studio
+            Get a free key from Groq Console
           </a>
 
           {/* Info note */}
@@ -98,7 +98,7 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
             <AlertCircle size={12} className="text-slate-500 mt-0.5 flex-shrink-0" />
             <p className="text-[11px] text-slate-500 leading-relaxed">
               The key is stored in the server process memory only — it is never written to disk or sent
-              anywhere other than Google's API. Restart the server and re-enter to change it.
+              anywhere other than Groq's API. Restart the server and re-enter to change it.
             </p>
           </div>
 

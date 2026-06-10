@@ -567,18 +567,18 @@ async def delete_document(request: DeleteDocumentRequest):
 
 @app.get("/api/config/status")
 async def get_config_status():
-    return {"has_key": bool(os.environ.get("GOOGLE_API_KEY", "").strip())}
+    return {"has_key": bool(os.environ.get("GROQ_API_KEY", "").strip())}
 
 
 @app.post("/api/config/apikey")
 async def set_api_key(request: ApiKeyRequest):
     if not request.api_key.strip():
         raise HTTPException(status_code=400, detail="API key cannot be empty")
-    os.environ["GOOGLE_API_KEY"] = request.api_key.strip()
+    os.environ["GROQ_API_KEY"] = request.api_key.strip()
     try:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        services.llm = ChatGoogleGenerativeAI(
-            model="gemini-3.1-flash-lite",
+        from langchain_groq import ChatGroq
+        services.llm = ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             temperature=0.2,
             max_tokens=1024,
         )

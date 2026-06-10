@@ -2,7 +2,7 @@ import os
 import shutil
 from typing import List, Any, Optional
 import chromadb
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -14,8 +14,8 @@ load_dotenv()
 
 class SharedServices:
     def __init__(self):
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-3.1-flash-lite",
+        self.llm = ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             temperature=0.2,
             max_tokens=1024,
         )

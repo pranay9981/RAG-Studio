@@ -87,7 +87,7 @@ class MultimodalRAGPipeline:
 
         message = HumanMessage(content=content)
 
-        step("Generating answer with Gemini Vision…")
+        step("Generating answer with Llama 4 Scout Vision…")
         full_text = ""
         for chunk in services.llm.stream([message]):
             token = services.extract_response_text(chunk)
