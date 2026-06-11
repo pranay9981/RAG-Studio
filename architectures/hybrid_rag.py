@@ -31,7 +31,7 @@ class HybridRAGPipeline:
         try:
             if not self.collection.count():
                 return
-            result = self.collection.get(include=["documents", "metadatas", "ids"])
+            result = self.collection.get(include=["documents", "metadatas"])
             docs = result["documents"] or []
             metas = result["metadatas"] or [{}] * len(docs)
             ids = result["ids"] or []

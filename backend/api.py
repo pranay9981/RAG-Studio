@@ -623,7 +623,7 @@ async def delete_document(request: DeleteDocumentRequest):
         if not pipeline or not hasattr(pipeline, "collection"):
             continue
         try:
-            result = pipeline.collection.get(include=["metadatas", "ids"])
+            result = pipeline.collection.get(include=["metadatas"])
             ids_to_delete = [
                 doc_id for doc_id, meta in zip(result["ids"] or [], result["metadatas"] or [])
                 if (meta or {}).get("source", "Unknown").split("/")[-1].split("\\")[-1] == request.source
