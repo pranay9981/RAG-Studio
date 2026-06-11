@@ -164,7 +164,7 @@ export default function Page() {
             results.map(async r => {
               if (r.error || !r.answer) return r
               try {
-                const evalScore = await evaluateAnswer(q, r.answer, [], r.arch_key)
+                const evalScore = await evaluateAnswer(q, r.answer, r.sources ?? [], r.arch_key)
                 return { ...r, eval: evalScore }
               } catch { return r }
             })

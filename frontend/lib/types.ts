@@ -50,6 +50,7 @@ export interface CompareResult {
   arch_key: string
   answer: string
   elapsed: number
+  sources?: Source[]
   error?: string
   eval?: EvalScore
 }

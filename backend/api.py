@@ -457,18 +457,27 @@ async def compare(request: CompareRequest):
     def run_one(i: int, arch_key: str, state_key: str):
         pipeline = session.get_pipeline(state_key)
         start = time.time()
+        captured_sources: list = []
+
+        def capture_step(event):
+            kind, content = event
+            if kind == "sources":
+                captured_sources.extend(content)
+
         try:
-            answer = pipeline.query(request.query)
+            answer = pipeline.query(request.query, on_step=capture_step)
             result_list[i] = {
                 "arch_key": arch_key,
                 "answer": answer,
                 "elapsed": round(time.time() - start, 3),
+                "sources": captured_sources[:5],
             }
         except Exception as e:
             result_list[i] = {
                 "arch_key": arch_key,
                 "answer": "",
                 "elapsed": round(time.time() - start, 3),
+                "sources": [],
                 "error": str(e),
             }
 
@@ -489,73 +498,49 @@ async def compare(request: CompareRequest):
 @app.post("/api/evaluate")
 async def evaluate_answer(request: EvalRequest):
     context = "\n".join(s.get("text", "") for s in request.sources) if request.sources else ""
+    has_context = bool(context.strip())
     scores = {"faithfulness": 0, "relevance": 0, "context_precision": 0, "context_recall": 0}
-    eval_ok = False
 
-    # ── Step 1: RAGAS-style faithfulness — extract claims then verify each ────
-    faithfulness_score = 0
-    try:
-        claims_prompt = f"""Break this answer into individual factual claims. Each claim = one verifiable statement.
-Answer: {request.answer[:600]}
-Output ONLY a JSON array of strings: ["claim1", "claim2", ...]"""
-        claims_resp = services.llm.invoke(claims_prompt)
-        claims_text = services.extract_response_text(claims_resp)
-        cm = re.search(r"\[.*?\]", claims_text, re.DOTALL)
-        claims = json.loads(cm.group()) if cm else []
+    context_metrics = (
+        '- faithfulness: Are ALL claims in the answer supported by the context? (0=unsupported, 10=fully grounded)\n'
+        '- context_precision: Were the retrieved chunks relevant to the query? (0=irrelevant, 10=all relevant)\n'
+        '- context_recall: Did the context contain everything needed to answer fully? (0=key info missing, 10=complete)\n'
+    ) if has_context else ""
 
-        if claims and context:
-            verify_prompt = f"""For each claim, output true if it is SUPPORTED by the context, false otherwise.
-Context: {context[:1500]}
-Claims: {json.dumps(claims[:10])}
-Output ONLY a JSON array of booleans (one per claim): [true, false, ...]"""
-            verify_resp = services.llm.invoke(verify_prompt)
-            verify_text = services.extract_response_text(verify_resp)
-            vm = re.search(r"\[.*?\]", verify_text, re.DOTALL)
-            supported = json.loads(vm.group()) if vm else []
-            if supported and claims:
-                faithfulness_score = round(sum(1 for s in supported if s) / len(claims) * 10)
-    except Exception as e:
-        print(f"[evaluate] faithfulness step failed: {e}")
+    context_json = (
+        ', "faithfulness": X, "context_precision": X, "context_recall": X'
+    ) if has_context else ""
 
-    # ── Step 2: relevance, context_precision, context_recall in one call ─────
-    try:
-        other_prompt = f"""You are an expert RAG evaluator. Score on three dimensions.
+    prompt = f"""You are a RAG evaluation expert. Score this response strictly and objectively.
 
 Question: {request.query}
-Retrieved Context: {context[:1200] if context else "N/A"}
-Generated Answer: {request.answer[:600]}
+Retrieved Context: {context[:1500] if has_context else "(not available)"}
+Generated Answer: {request.answer[:800]}
 
-Score each 0-10:
-1. Relevance: Does the answer directly address the question? (0=off-topic, 10=perfect)
-2. Context Precision: Were the retrieved chunks relevant to the query? (0=all irrelevant, 10=all relevant)
-3. Context Recall: Did the context contain all information needed to fully answer? (0=missing key info, 10=complete)
+Score each metric 0-10:
+- relevance: Does the answer directly and completely address the question? (0=off-topic, 10=perfect)
+{context_metrics}
+Output ONLY valid JSON: {{"relevance": X{context_json}}}"""
 
-Output ONLY valid JSON: {{"relevance": X, "context_precision": X, "context_recall": X}}"""
-
-        resp = services.llm.invoke(other_prompt)
+    try:
+        resp = services.llm.invoke(prompt)
         text = services.extract_response_text(resp)
-        m = re.search(r"\{[^}]+\}", text)
+        m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
         if m:
             raw = json.loads(m.group())
             scores = {
-                "faithfulness": faithfulness_score,
+                "faithfulness": max(0, min(10, int(raw.get("faithfulness", 0)))) if has_context else 0,
                 "relevance": max(0, min(10, int(raw.get("relevance", 0)))),
-                "context_precision": max(0, min(10, int(raw.get("context_precision", 0)))),
-                "context_recall": max(0, min(10, int(raw.get("context_recall", 0)))),
+                "context_precision": max(0, min(10, int(raw.get("context_precision", 0)))) if has_context else 0,
+                "context_recall": max(0, min(10, int(raw.get("context_recall", 0)))) if has_context else 0,
             }
-            eval_ok = True
+            if request.arch_key:
+                try:
+                    adaptive_db.store_eval_analytics(request.arch_key, request.query, scores)
+                except Exception as e:
+                    print(f"[evaluate] store_eval_analytics failed: {e}")
     except Exception as e:
-        print(f"[evaluate] other metrics step failed: {e}")
-        if faithfulness_score:
-            scores["faithfulness"] = faithfulness_score
-            eval_ok = True
-
-    # Only store analytics when at least one LLM step succeeded
-    if eval_ok and request.arch_key:
-        try:
-            adaptive_db.store_eval_analytics(request.arch_key, request.query, scores)
-        except Exception as e:
-            print(f"[evaluate] store_eval_analytics failed: {e}")
+        print(f"[evaluate] failed: {e}")
 
     return scores
 
