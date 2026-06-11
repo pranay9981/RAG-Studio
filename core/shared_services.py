@@ -1,6 +1,7 @@
 import os
 import shutil
 from typing import List, Any, Optional
+import threading
 import chromadb
 from langchain_groq import ChatGroq
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -27,6 +28,7 @@ class SharedServices:
         # Try to init LLM eagerly if key already present
         if os.environ.get("GROQ_API_KEY", "").strip():
             self._init_llm()
+        self._chroma_lock = threading.Lock()
 
     def _init_llm(self):
         self._llm = ChatGroq(

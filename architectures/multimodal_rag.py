@@ -53,11 +53,12 @@ class MultimodalRAGPipeline:
         query_embedding = services.embeddings.embed_query(query)
 
         step("Retrieving documents and images from ChromaDB…")
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=3,
-            include=["documents", "metadatas"],
-        )
+        with services._chroma_lock:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=3,
+                include=["documents", "metadatas"],
+            )
 
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metadatas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)

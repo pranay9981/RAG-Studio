@@ -13,7 +13,8 @@ class MultilingualRAGPipeline:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
             # Detect stale collection created with MiniLM (384-dim) instead of BGE-M3 (1024-dim)
             if self.collection.count() > 0:
-                sample = self.collection.get(include=["embeddings"], limit=1)
+                with services._chroma_lock:
+                    sample = self.collection.get(include=["embeddings"], limit=1)
                 embs = sample.get("embeddings") or []
                 if embs and len(embs[0]) != 1024:
                     print(f"[multilingual_rag] Dimension mismatch ({len(embs[0])} vs 1024) — recreating collection")
@@ -64,18 +65,22 @@ class MultilingualRAGPipeline:
                 on_step(("step", msg))
 
         if not self.collection.count():
-            return "No documents ingested yet."
+            return "No documents ingested for Multilingual RAG. Please re-ingest your document (requires BGE-M3 model — ensure ~6 GB RAM is free)."
 
         step("Embedding query with multilingual model…")
-        query_embedding = services.multilingual_embeddings.embed_query(query)
+        try:
+            query_embedding = services.multilingual_embeddings.embed_query(query)
+        except Exception as e:
+            return f"Multilingual RAG unavailable: BGE-M3 model failed to load ({e}). Free ~6 GB RAM and restart the backend, then re-ingest."
 
         step("Cross-lingual retrieval from ChromaDB…")
         n = min(8, self.collection.count())
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n,
-            include=["documents", "metadatas"],
-        )
+        with services._chroma_lock:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n,
+                include=["documents", "metadatas"],
+            )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
 

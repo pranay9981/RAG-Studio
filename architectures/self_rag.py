@@ -56,11 +56,12 @@ class SelfRAGPipeline:
 
     def _retrieve(self, query: str, top_k: int) -> Tuple[List[str], List[dict]]:
         n = min(top_k, self.collection.count())
-        results = self.collection.query(
-            query_embeddings=[services.embeddings.embed_query(query)],
-            n_results=n,
-            include=["documents", "metadatas"],
-        )
+        with services._chroma_lock:
+            results = self.collection.query(
+                query_embeddings=[services.embeddings.embed_query(query)],
+                n_results=n,
+                include=["documents", "metadatas"],
+            )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
         return docs, metas

@@ -75,13 +75,36 @@ Passage:"""
 
         step("Retrieving real documents closest to hypothetical embedding…")
         n = min(top_k, self.collection.count())
-        results = self.collection.query(
-            query_embeddings=[hyde_embedding],
-            n_results=n,
-            include=["documents", "metadatas"],
-        )
+        with services._chroma_lock:
+            results = self.collection.query(
+                query_embeddings=[hyde_embedding],
+                n_results=n,
+                include=["documents", "metadatas"],
+            )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
+
+        # Supplement with direct query retrieval if only 1 source found (HyDE can miss documents)
+        distinct_sources = len({(m or {}).get("source", "Unknown") for m in metas})
+        total_docs = self.collection.count()
+        if distinct_sources < 2 and total_docs > len(docs):
+            step("Supplementing with direct query retrieval for broader source coverage…")
+            direct_embedding = services.embeddings.embed_query(query)
+            supp_n = min(top_k, total_docs)
+            with services._chroma_lock:
+                supp_results = self.collection.query(
+                    query_embeddings=[direct_embedding],
+                    n_results=supp_n,
+                    include=["documents", "metadatas"],
+                )
+            supp_docs = supp_results["documents"][0] if supp_results.get("documents") and supp_results["documents"][0] else []
+            supp_metas = supp_results["metadatas"][0] if supp_results.get("metadatas") and supp_results["metadatas"][0] else [{}] * len(supp_docs)
+            existing_texts = set(docs)
+            for d, m in zip(supp_docs, supp_metas):
+                if d not in existing_texts:
+                    docs.append(d)
+                    metas.append(m)
+                    existing_texts.add(d)
 
         # Self-evaluation
         quality = services.evaluate_context(query, docs)

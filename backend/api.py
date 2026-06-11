@@ -457,29 +457,39 @@ async def compare(request: CompareRequest):
     def run_one(i: int, arch_key: str, state_key: str):
         pipeline = session.get_pipeline(state_key)
         start = time.time()
-        captured_sources: list = []
 
-        def capture_step(event):
-            kind, content = event
-            if kind == "sources":
-                captured_sources.extend(content)
+        for attempt in range(2):
+            captured_sources: list = []
 
-        try:
-            answer = pipeline.query(request.query, on_step=capture_step)
-            result_list[i] = {
-                "arch_key": arch_key,
-                "answer": answer,
-                "elapsed": round(time.time() - start, 3),
-                "sources": captured_sources[:5],
-            }
-        except Exception as e:
-            result_list[i] = {
-                "arch_key": arch_key,
-                "answer": "",
-                "elapsed": round(time.time() - start, 3),
-                "sources": [],
-                "error": str(e),
-            }
+            def capture_step(event):
+                kind, content = event
+                if kind == "sources":
+                    captured_sources.extend(content)
+
+            try:
+                answer = pipeline.query(request.query, on_step=capture_step)
+                result_list[i] = {
+                    "arch_key": arch_key,
+                    "answer": answer,
+                    "elapsed": round(time.time() - start, 3),
+                    "sources": captured_sources[:5],
+                }
+                return
+            except Exception as e:
+                err = str(e)
+                # Retry once on HNSW segment reader errors (transient concurrency issue)
+                if attempt == 0 and ("hnsw" in err.lower() or "Nothing found on disk" in err):
+                    print(f"[compare] HNSW error for {arch_key}, retrying… ({err[:80]})")
+                    time.sleep(0.3)
+                    continue
+                result_list[i] = {
+                    "arch_key": arch_key,
+                    "answer": "",
+                    "elapsed": round(time.time() - start, 3),
+                    "sources": [],
+                    "error": err,
+                }
+                return
 
     threads = []
     for i, arch_key in enumerate(ARCH_KEYS):
@@ -488,6 +498,7 @@ async def compare(request: CompareRequest):
         )
         threads.append(t)
         t.start()
+        time.sleep(0.05)  # 50ms stagger — reduces simultaneous HNSW reader initialization
 
     for t in threads:
         t.join(timeout=120)

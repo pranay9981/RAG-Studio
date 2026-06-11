@@ -54,11 +54,12 @@ class CorrectiveRAGPipeline:
             return {"documents": []}
         query_embedding = services.embeddings.embed_query(query)
         n = min(4, self.collection.count())
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n,
-            include=["documents", "metadatas"],
-        )
+        with services._chroma_lock:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n,
+                include=["documents", "metadatas"],
+            )
         docs = results["documents"][0] if results["documents"][0] else []
         metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
         if self._on_step and docs:

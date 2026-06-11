@@ -31,7 +31,8 @@ class HybridRAGPipeline:
         try:
             if not self.collection.count():
                 return
-            result = self.collection.get(include=["documents", "metadatas"])
+            with services._chroma_lock:
+                result = self.collection.get(include=["documents", "metadatas"])
             docs = result["documents"] or []
             metas = result["metadatas"] or [{}] * len(docs)
             ids = result["ids"] or []
@@ -108,11 +109,12 @@ class HybridRAGPipeline:
 
         step(f"Dense retrieval from ChromaDB (top {top_k})…")
         n = min(top_k * 2, self.collection.count())
-        dense_response = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n,
-            include=["documents", "metadatas", "distances"],
-        )
+        with services._chroma_lock:
+            dense_response = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n,
+                include=["documents", "metadatas", "distances"],
+            )
         dense_results = [
             {
                 "id": dense_response["ids"][0][i],
