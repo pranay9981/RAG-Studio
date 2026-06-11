@@ -495,11 +495,21 @@ async def compare(request: CompareRequest):
     return {"results": [r for r in result_list if r is not None]}
 
 
+def _safe_score(val, default: int = 0) -> int:
+    """Convert LLM score value to int, handling floats, float-strings, and None."""
+    try:
+        return max(0, min(10, int(float(str(val)))))
+    except (TypeError, ValueError):
+        return default
+
+
 @app.post("/api/evaluate")
 async def evaluate_answer(request: EvalRequest):
     context = "\n".join(s.get("text", "") for s in request.sources) if request.sources else ""
     has_context = bool(context.strip())
     scores = {"faithfulness": 0, "relevance": 0, "context_precision": 0, "context_recall": 0}
+
+    print(f"[evaluate] arch={request.arch_key!r} has_context={has_context} sources={len(request.sources)} query={request.query[:60]!r}")
 
     context_metrics = (
         '- faithfulness: Are ALL claims in the answer supported by the context? (0=unsupported, 10=fully grounded)\n'
@@ -525,22 +535,26 @@ Output ONLY valid JSON: {{"relevance": X{context_json}}}"""
     try:
         resp = services.llm.invoke(prompt)
         text = services.extract_response_text(resp)
+        print(f"[evaluate] llm raw: {text[:300]!r}")
         m = re.search(r'\{[^{}]+\}', text, re.DOTALL)
         if m:
             raw = json.loads(m.group())
             scores = {
-                "faithfulness": max(0, min(10, int(raw.get("faithfulness", 0)))) if has_context else 0,
-                "relevance": max(0, min(10, int(raw.get("relevance", 0)))),
-                "context_precision": max(0, min(10, int(raw.get("context_precision", 0)))) if has_context else 0,
-                "context_recall": max(0, min(10, int(raw.get("context_recall", 0)))) if has_context else 0,
+                "faithfulness": _safe_score(raw.get("faithfulness", 0)) if has_context else 0,
+                "relevance": _safe_score(raw.get("relevance", 0)),
+                "context_precision": _safe_score(raw.get("context_precision", 0)) if has_context else 0,
+                "context_recall": _safe_score(raw.get("context_recall", 0)) if has_context else 0,
             }
+            print(f"[evaluate] scores={scores}")
             if request.arch_key:
                 try:
                     adaptive_db.store_eval_analytics(request.arch_key, request.query, scores)
                 except Exception as e:
                     print(f"[evaluate] store_eval_analytics failed: {e}")
+        else:
+            print(f"[evaluate] no JSON match in: {text[:300]!r}")
     except Exception as e:
-        print(f"[evaluate] failed: {e}")
+        print(f"[evaluate] FAILED: {e}")
 
     return scores
 
