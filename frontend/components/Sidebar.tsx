@@ -37,7 +37,7 @@ export default function Sidebar({
       <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center gap-2.5">
         <div className="w-6 h-6 rounded bg-indigo-500/20 flex items-center justify-center text-xs">⚡</div>
         <span className="text-sm font-semibold text-white/90 tracking-tight">RAG Studio</span>
-        <span className="ml-auto text-[10px] font-mono text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded">v3</span>
+        <span className="ml-auto text-[10px] font-mono text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded">v4</span>
       </div>
 
       <div className="flex-1 overflow-y-auto">

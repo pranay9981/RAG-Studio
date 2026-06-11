@@ -23,11 +23,16 @@ from langchain_core.messages import HumanMessage
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="RAG System API", version="3.0.0", docs_url="/docs")
+app = FastAPI(title="RAG System API", version="4.0.0", docs_url="/docs")
+
+_raw_origins = os.environ.get(
+    "FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+)
+_ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -166,7 +171,7 @@ async def get_architectures():
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str):
     return {
-        "session_id": "default",
+        "session_id": session_id,
         "ingested_archs": list(session.ingested_archs),
         "doc_library": session.doc_library,
         "history_count": len(session.history),

@@ -46,13 +46,6 @@ export interface HistoryItem {
   answer: string
 }
 
-export interface StreamingState {
-  steps: string[]
-  tokens: string
-  sources: Source[]
-  isStreaming: boolean
-}
-
 export interface CompareResult {
   arch_key: string
   answer: string

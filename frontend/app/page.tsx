@@ -130,14 +130,13 @@ export default function Page() {
 
     try {
       await submitFeedback(query, msg.arch || selectedArch, msg.chunk_ids || [], rating)
+      setAllMessages(prev => ({
+        ...prev,
+        [chatKey]: (prev[chatKey] ?? []).map(m =>
+          m.id === messageId ? { ...m, feedback: rating > 0 ? 'up' : 'down' } : m
+        ),
+      }))
     } catch {}
-
-    setAllMessages(prev => ({
-      ...prev,
-      [chatKey]: (prev[chatKey] ?? []).map(m =>
-        m.id === messageId ? { ...m, feedback: rating > 0 ? 'up' : 'down' } : m
-      ),
-    }))
   }, [allMessages, chatKey, selectedArch])
 
   const handleSend = useCallback(async () => {
@@ -362,6 +361,11 @@ export default function Page() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              onInput={e => {
+                const el = e.currentTarget
+                el.style.height = 'auto'
+                el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+              }}
               placeholder={
                 ingestedArchs.size === 0
                   ? 'Upload a document first…'
