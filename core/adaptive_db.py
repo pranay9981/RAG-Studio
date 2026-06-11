@@ -1,61 +1,67 @@
+import os
 import sqlite3
 import json
 import time
+import threading
 from typing import Optional, List, Dict, Any
 
-DB_PATH = "adaptive.db"
+_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "adaptive_data")
+os.makedirs(_DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(_DB_DIR, "adaptive.db")
 
 
 class AdaptiveDB:
     def __init__(self):
+        self._lock = threading.Lock()
         self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         self._init_tables()
 
     def _init_tables(self):
-        self.conn.executescript("""
-        CREATE TABLE IF NOT EXISTS feedback (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            query TEXT NOT NULL,
-            arch_key TEXT NOT NULL,
-            chunk_ids TEXT NOT NULL,
-            rating INTEGER NOT NULL,
-            ts REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS query_cache (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            arch_key TEXT NOT NULL,
-            query_text TEXT NOT NULL,
-            query_embedding TEXT NOT NULL,
-            answer TEXT NOT NULL,
-            sources TEXT NOT NULL,
-            ts REAL NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS analytics (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            arch_key TEXT NOT NULL,
-            query TEXT NOT NULL,
-            elapsed REAL NOT NULL DEFAULT 0,
-            faithfulness REAL DEFAULT 0,
-            relevance REAL DEFAULT 0,
-            context_precision REAL DEFAULT 0,
-            context_recall REAL DEFAULT 0,
-            cached INTEGER DEFAULT 0,
-            ts REAL NOT NULL
-        );
-        """)
-        self.conn.commit()
+        with self._lock:
+            self.conn.executescript("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                query TEXT NOT NULL,
+                arch_key TEXT NOT NULL,
+                chunk_ids TEXT NOT NULL,
+                rating INTEGER NOT NULL,
+                ts REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS query_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                arch_key TEXT NOT NULL,
+                query_text TEXT NOT NULL,
+                query_embedding TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                sources TEXT NOT NULL,
+                ts REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                arch_key TEXT NOT NULL,
+                query TEXT NOT NULL,
+                elapsed REAL NOT NULL DEFAULT 0,
+                faithfulness REAL DEFAULT 0,
+                relevance REAL DEFAULT 0,
+                context_precision REAL DEFAULT 0,
+                context_recall REAL DEFAULT 0,
+                cached INTEGER DEFAULT 0,
+                ts REAL NOT NULL
+            );
+            """)
+            self.conn.commit()
 
     # ── Feedback ──────────────────────────────────────────────────────────────
 
     def store_feedback(self, query: str, arch_key: str, chunk_ids: List[str], rating: int):
-        self.conn.execute(
-            "INSERT INTO feedback (query, arch_key, chunk_ids, rating, ts) VALUES (?, ?, ?, ?, ?)",
-            (query, arch_key, json.dumps(chunk_ids), rating, time.time()),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO feedback (query, arch_key, chunk_ids, rating, ts) VALUES (?, ?, ?, ?, ?)",
+                (query, arch_key, json.dumps(chunk_ids), rating, time.time()),
+            )
+            self.conn.commit()
 
     def get_positive_sources(self, arch_key: str) -> List[str]:
-        """Returns list of chunk text snippets that received positive feedback for this arch."""
         rows = self.conn.execute(
             "SELECT chunk_ids FROM feedback WHERE arch_key = ? AND rating > 0 ORDER BY ts DESC LIMIT 100",
             (arch_key,),
@@ -118,23 +124,24 @@ class AdaptiveDB:
         answer: str,
         sources: List[Dict],
     ):
-        self.conn.execute(
-            "DELETE FROM query_cache WHERE arch_key = ? AND query_text = ?",
-            (arch_key, query),
-        )
-        self.conn.execute(
-            "INSERT INTO query_cache (arch_key, query_text, query_embedding, answer, sources, ts) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                arch_key,
-                query,
-                json.dumps(query_embedding),
-                answer,
-                json.dumps(sources),
-                time.time(),
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM query_cache WHERE arch_key = ? AND query_text = ?",
+                (arch_key, query),
+            )
+            self.conn.execute(
+                "INSERT INTO query_cache (arch_key, query_text, query_embedding, answer, sources, ts) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    arch_key,
+                    query,
+                    json.dumps(query_embedding),
+                    answer,
+                    json.dumps(sources),
+                    time.time(),
+                ),
+            )
+            self.conn.commit()
 
     def get_cache_count(self, arch_key: str) -> int:
         row = self.conn.execute(
@@ -147,29 +154,31 @@ class AdaptiveDB:
     def store_query_analytics(
         self, arch_key: str, query: str, elapsed: float, cached: bool = False
     ):
-        self.conn.execute(
-            "INSERT INTO analytics (arch_key, query, elapsed, cached, ts) VALUES (?, ?, ?, ?, ?)",
-            (arch_key, query, elapsed, 1 if cached else 0, time.time()),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO analytics (arch_key, query, elapsed, cached, ts) VALUES (?, ?, ?, ?, ?)",
+                (arch_key, query, elapsed, 1 if cached else 0, time.time()),
+            )
+            self.conn.commit()
 
     def store_eval_analytics(
         self, arch_key: str, query: str, eval_scores: Dict[str, float]
     ):
-        self.conn.execute(
-            "INSERT INTO analytics (arch_key, query, elapsed, faithfulness, relevance, "
-            "context_precision, context_recall, ts) VALUES (?, ?, 0, ?, ?, ?, ?, ?)",
-            (
-                arch_key,
-                query,
-                eval_scores.get("faithfulness", 0),
-                eval_scores.get("relevance", 0),
-                eval_scores.get("context_precision", 0),
-                eval_scores.get("context_recall", 0),
-                time.time(),
-            ),
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO analytics (arch_key, query, elapsed, faithfulness, relevance, "
+                "context_precision, context_recall, ts) VALUES (?, ?, 0, ?, ?, ?, ?, ?)",
+                (
+                    arch_key,
+                    query,
+                    eval_scores.get("faithfulness", 0),
+                    eval_scores.get("relevance", 0),
+                    eval_scores.get("context_precision", 0),
+                    eval_scores.get("context_recall", 0),
+                    time.time(),
+                ),
+            )
+            self.conn.commit()
 
     def get_analytics(self) -> Dict:
         rows = self.conn.execute("""
@@ -210,7 +219,6 @@ class AdaptiveDB:
         return result
 
     def get_feedback_docs(self, arch_key: str):
-        """Returns (positive_snippets, negative_snippets) as sets of lowercased text prefixes."""
         rows = self.conn.execute(
             "SELECT chunk_ids, rating FROM feedback WHERE arch_key = ? ORDER BY ts DESC LIMIT 500",
             (arch_key,),
@@ -228,8 +236,6 @@ class AdaptiveDB:
         return positive, negative
 
     def apply_feedback_boost(self, texts: List[str], metas: List[Any], arch_key: str):
-        """Reorders (texts, metas) so positively-rated chunks surface first, negative last.
-        Matching is done on the first 80 chars of each text against stored feedback snippets."""
         positive, negative = self.get_feedback_docs(arch_key)
         if not positive and not negative:
             return texts, metas

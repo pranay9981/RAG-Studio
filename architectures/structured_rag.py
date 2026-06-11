@@ -106,7 +106,14 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
             if "DATA:\n" in csv_text:
                 data_part = csv_text.split("DATA:\n", 1)[1]
             df = pd.read_csv(io.StringIO(data_part))
-            result = eval(code, {"df": df, "pd": pd, "__builtins__": {}})
+            _FORBIDDEN = (
+                "import", "exec", "eval", "__", "open(", "os.", "sys.",
+                "subprocess", "shutil", "globals", "locals", "getattr",
+                "setattr", "delattr", "compile", "input", "print(",
+            )
+            if any(p in code for p in _FORBIDDEN):
+                raise ValueError("Unsafe pattern detected in generated pandas expression")
+            result = eval(code, {"__builtins__": None}, {"df": df, "pd": pd})
             return f"**Pandas result:** `{code}`\n\nResult:\n```\n{str(result)[:1200]}\n```"
         except Exception as e:
             print(f"[structured_rag] pandas query failed: {e}")
@@ -163,7 +170,7 @@ Query: {query}
 
 Provide a clear, data-driven answer. If structured results are available, reference the exact numbers."""
 
-        step("Generating answer with Gemini…")
+        step("Generating with Llama 4 Scout…")
         return services.stream_llm(
             prompt, on_token=lambda t: on_step and on_step(("token", t))
         )

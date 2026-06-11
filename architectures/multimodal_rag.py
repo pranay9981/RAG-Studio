@@ -88,11 +88,23 @@ class MultimodalRAGPipeline:
         message = HumanMessage(content=content)
 
         step("Generating answer with Llama 4 Scout Vision…")
-        full_text = ""
-        for chunk in services.llm.stream([message]):
-            token = services.extract_response_text(chunk)
-            if token:
+        try:
+            full_text = ""
+            for chunk in services.llm.stream([message]):
+                token = services.extract_response_text(chunk)
+                if token:
+                    if on_step:
+                        on_step(("token", token))
+                    full_text += token
+            return full_text
+        except Exception as e:
+            err_msg = str(e)
+            if any(k in err_msg.lower() for k in ("vision", "image", "400", "unsupported", "invalid")):
+                fallback = (
+                    "⚠️ Vision processing failed for this image format. "
+                    "Text context was retrieved successfully — try asking a text-only question about the document."
+                )
                 if on_step:
-                    on_step(("token", token))
-                full_text += token
-        return full_text
+                    on_step(("token", fallback))
+                return fallback
+            raise

@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'RAG Studio — 8 Architectures',
-  description: 'Compare 8 state-of-the-art RAG architectures on your documents',
+  title: 'RAG Studio — 10 Architectures',
+  description: 'Compare 10 state-of-the-art RAG architectures on your documents',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

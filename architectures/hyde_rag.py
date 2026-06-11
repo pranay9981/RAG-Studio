@@ -68,7 +68,7 @@ Passage:"""
         if not self.collection.count():
             return "Please ingest a document first!"
 
-        step("Generating hypothetical answer document with Gemini…")
+        step("Generating hypothetical answer document…")
         hypothetical_doc = self._generate_hypothetical_document(query)
 
         step("Embedding hypothetical document into vector space…")

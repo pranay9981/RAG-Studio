@@ -230,7 +230,8 @@ async def ingest_document(
             except Exception as exc:
                 print(f"[ingest] {arch_key} failed: {exc}")
 
-    session.doc_library.append({"name": source_name, "chunks": len(docs)})
+    if ingested:
+        session.doc_library.append({"name": source_name, "chunks": len(docs)})
     return {"chunks": len(docs), "source": source_name, "architectures": ingested}
 
 
@@ -574,7 +575,30 @@ async def get_config_status():
 async def set_api_key(request: ApiKeyRequest):
     if not request.api_key.strip():
         raise HTTPException(status_code=400, detail="API key cannot be empty")
-    os.environ["GROQ_API_KEY"] = request.api_key.strip()
+    key = request.api_key.strip()
+    os.environ["GROQ_API_KEY"] = key
+
+    # Persist to .env so the key survives server restarts
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+    try:
+        lines: list = []
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                lines = f.readlines()
+        key_line = f"GROQ_API_KEY={key}\n"
+        replaced = False
+        for i, line in enumerate(lines):
+            if line.startswith("GROQ_API_KEY="):
+                lines[i] = key_line
+                replaced = True
+                break
+        if not replaced:
+            lines.append(key_line)
+        with open(env_path, "w") as f:
+            f.writelines(lines)
+    except Exception as e:
+        print(f"[config] Could not persist API key to .env: {e}")
+
     try:
         from langchain_groq import ChatGroq
         services.llm = ChatGroq(

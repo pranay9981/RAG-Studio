@@ -1,3 +1,4 @@
+import os
 import networkx as nx
 import json
 import uuid
@@ -21,7 +22,45 @@ class GraphRAGPipeline:
             except Exception:
                 pass
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-        # Note: NetworkX graph is in-memory only; re-ingest to rebuild after restart
+        self._load_graph()
+
+    @property
+    def _graph_path(self) -> str:
+        return os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "chroma_db", "graph_rag.json"
+        )
+
+    def _save_graph(self):
+        try:
+            os.makedirs(os.path.dirname(self._graph_path), exist_ok=True)
+            data = {
+                "nodes": list(self.graph.nodes()),
+                "edges": [
+                    {"source": u, "target": v, "relationship": d.get("relationship", "")}
+                    for u, v, d in self.graph.edges(data=True)
+                ],
+            }
+            with open(self._graph_path, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            print(f"[graph_rag] Saved {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
+        except Exception as e:
+            print(f"[graph_rag] Failed to save graph: {e}")
+
+    def _load_graph(self):
+        if not os.path.exists(self._graph_path):
+            return
+        try:
+            with open(self._graph_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.graph.clear()
+            for edge in data.get("edges", []):
+                self.graph.add_edge(
+                    edge["source"], edge["target"],
+                    relationship=edge.get("relationship", ""),
+                )
+            print(f"[graph_rag] Loaded {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges from disk")
+        except Exception as e:
+            print(f"[graph_rag] Failed to load graph: {e}")
 
     def reset(self):
         try:
@@ -30,6 +69,11 @@ class GraphRAGPipeline:
             pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph.clear()
+        try:
+            if os.path.exists(self._graph_path):
+                os.remove(self._graph_path)
+        except Exception:
+            pass
 
     def _extract_entities_and_relationships(self, text: str) -> List[Dict]:
         prompt = f"""Extract key entities and relationships from the following text.
@@ -80,6 +124,7 @@ Text:
                         triple["target"],
                         relationship=triple["relationship"],
                     )
+        self._save_graph()
 
     def _extract_query_entities(self, query: str) -> List[str]:
         prompt = f"""Extract the main entities from this query. Output ONLY a comma-separated list of entity names, nothing else.
@@ -215,7 +260,7 @@ Query: {query}
 
 Answer:"""
 
-        step("Generating answer with Gemini…")
+        step("Generating with Llama 4 Scout…")
         return services.stream_llm(
             prompt, on_token=lambda t: on_step and on_step(("token", t))
         )

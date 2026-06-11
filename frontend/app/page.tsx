@@ -14,6 +14,7 @@ import ArchExplainer from '@/components/ArchExplainer'
 import {
   getArchitectures, streamQuery, compareAll, evaluateAnswer,
   resetSession, getGraphHtml, submitFeedback, getAnalytics, getConfigStatus,
+  listDocuments,
 } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
@@ -51,11 +52,20 @@ export default function Page() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
-  // Load architectures + check API key
+  // Load architectures + hydrate doc library + check API key
   useEffect(() => {
     getArchitectures().then(list => {
       setArchs(list)
-      if (list.length) setSelectedArch(list[0].key)
+      if (list.length) {
+        setSelectedArch(list[0].key)
+        // Hydrate doc library from ChromaDB (persisted across server restarts)
+        listDocuments(list[0].key).then(docs => {
+          if (docs.length > 0) {
+            setDocLibrary(docs)
+            setIngestedArchs(new Set(list.map(a => a.key)))
+          }
+        })
+      }
     })
     getConfigStatus().then(({ has_key }) => { if (!has_key) setShowApiKey(true) }).catch(() => {})
   }, [])

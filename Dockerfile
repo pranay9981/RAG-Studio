@@ -10,10 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    fastapi>=0.100.0 \
-    "uvicorn[standard]>=0.27.0" \
-    python-multipart>=0.0.6
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .

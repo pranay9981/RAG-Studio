@@ -1,19 +1,21 @@
-import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, HistoryItem, AnalyticsData } from './types'
+import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, AnalyticsData } from './types'
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://127.0.0.1:8000'
 
 export async function getArchitectures(): Promise<ArchInfo[]> {
-  const r = await fetch(`${BASE}/api/architectures`)
-  return r.json()
-}
-
-export async function getSession(sessionId: string) {
-  const r = await fetch(`${BASE}/api/sessions/${sessionId}`)
-  return r.json()
+  try {
+    const r = await fetch(`${BASE}/api/architectures`)
+    if (!r.ok) return []
+    return r.json()
+  } catch {
+    return []
+  }
 }
 
 export async function resetSession(sessionId: string) {
-  await fetch(`${BASE}/api/sessions/${sessionId}`, { method: 'DELETE' })
+  try {
+    await fetch(`${BASE}/api/sessions/${sessionId}`, { method: 'DELETE' })
+  } catch {}
 }
 
 export async function ingestFile(file: File, archKeys: string[], sessionId = 'default'): Promise<{ chunks: number; source: string }> {
@@ -59,53 +61,72 @@ export function streamQuery(
     else if (d.type === 'done') { callbacks.onDone(d.answer, d.elapsed, d.cached || false); es.close() }
     else if (d.type === 'error') { callbacks.onError(d.content); es.close() }
   }
-  es.onerror = () => { callbacks.onError('Connection error'); es.close() }
+  es.onerror = () => { callbacks.onError('Connection error — is the backend running?'); es.close() }
 
   return () => es.close()
 }
 
 export async function compareAll(query: string, sessionId = 'default'): Promise<CompareResult[]> {
-  const r = await fetch(`${BASE}/api/compare`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, session_id: sessionId }),
-  })
-  const data = await r.json()
-  return data.results
+  try {
+    const r = await fetch(`${BASE}/api/compare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, session_id: sessionId }),
+    })
+    if (!r.ok) throw new Error(`Compare failed: ${r.status}`)
+    const data = await r.json()
+    return data.results ?? []
+  } catch (e) {
+    console.error('[compareAll]', e)
+    return []
+  }
 }
 
 export async function evaluateAnswer(query: string, answer: string, sources: Source[], archKey = ''): Promise<EvalScore> {
-  const r = await fetch(`${BASE}/api/evaluate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, answer, sources, arch_key: archKey }),
-  })
-  return r.json()
+  try {
+    const r = await fetch(`${BASE}/api/evaluate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, answer, sources, arch_key: archKey }),
+    })
+    if (!r.ok) throw new Error(`Eval failed: ${r.status}`)
+    return r.json()
+  } catch (e) {
+    console.error('[evaluateAnswer]', e)
+    return { faithfulness: 0, relevance: 0, context_precision: 0, context_recall: 0 }
+  }
 }
 
 export async function submitFeedback(query: string, archKey: string, chunkIds: string[], rating: number): Promise<void> {
-  await fetch(`${BASE}/api/feedback`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, arch_key: archKey, chunk_ids: chunkIds, rating }),
-  })
+  try {
+    await fetch(`${BASE}/api/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, arch_key: archKey, chunk_ids: chunkIds, rating }),
+    })
+  } catch {}
 }
 
 export async function getAnalytics(): Promise<AnalyticsData> {
-  const r = await fetch(`${BASE}/api/analytics`)
-  return r.json()
+  try {
+    const r = await fetch(`${BASE}/api/analytics`)
+    if (!r.ok) throw new Error(`Analytics failed: ${r.status}`)
+    return r.json()
+  } catch (e) {
+    console.error('[getAnalytics]', e)
+    return { data: {}, recent: [] }
+  }
 }
 
 export async function getGraphHtml(): Promise<string> {
-  const r = await fetch(`${BASE}/api/graph`)
-  const data = await r.json()
-  return data.html || ''
-}
-
-export async function getHistory(sessionId = 'default'): Promise<HistoryItem[]> {
-  const r = await fetch(`${BASE}/api/history?session_id=${sessionId}`)
-  const data = await r.json()
-  return data.history
+  try {
+    const r = await fetch(`${BASE}/api/graph`)
+    if (!r.ok) return ''
+    const data = await r.json()
+    return data.html || ''
+  } catch {
+    return ''
+  }
 }
 
 export async function deleteDocument(source: string): Promise<{ deleted: number }> {
@@ -118,9 +139,28 @@ export async function deleteDocument(source: string): Promise<{ deleted: number 
   return r.json()
 }
 
+export async function listDocuments(archKey: string): Promise<DocItem[]> {
+  try {
+    const r = await fetch(`${BASE}/api/documents?arch_key=${encodeURIComponent(archKey)}`)
+    if (!r.ok) return []
+    const data = await r.json()
+    return (data.documents ?? []).map((d: { source: string; chunks: number }) => ({
+      name: d.source,
+      chunks: d.chunks,
+    }))
+  } catch {
+    return []
+  }
+}
+
 export async function getConfigStatus(): Promise<{ has_key: boolean }> {
-  const r = await fetch(`${BASE}/api/config/status`)
-  return r.json()
+  try {
+    const r = await fetch(`${BASE}/api/config/status`)
+    if (!r.ok) return { has_key: false }
+    return r.json()
+  } catch {
+    return { has_key: false }
+  }
 }
 
 export async function setApiKey(apiKey: string): Promise<{ status: string }> {

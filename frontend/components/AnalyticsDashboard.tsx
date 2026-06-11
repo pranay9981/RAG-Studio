@@ -29,6 +29,8 @@ const ARCH_LABELS: Record<string, string> = {
   '06 Multilingual RAG (BGE-M3)': '06 Multilingual',
   '07 RAG-Fusion (Query Expansion)': '07 Fusion',
   '08 HyDE RAG (Hypothetical Document)': '08 HyDE',
+  '09 Structured RAG (CSV/Excel)': '09 Structured',
+  '10 Self-RAG (Reflection + Critique)': '10 Self-RAG',
 }
 
 export default function AnalyticsDashboard({ data, onClose }: Props) {

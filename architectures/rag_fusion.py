@@ -143,7 +143,7 @@ Original query: {query}
         fused_metas = [{"source": d.get("source", "Unknown"), "parent_text": d.get("window_text")} for d in top_docs[:top_k]]
         context = services.build_sourced_context(fused_texts, fused_metas)
 
-        step("Generating final answer with Gemini…")
+        step("Generating with Llama 4 Scout…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
 The context was retrieved using multiple query variations to maximise coverage.
 When the query asks to compare documents, use the [Source: ...] labels to distinguish between them.

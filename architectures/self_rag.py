@@ -235,6 +235,6 @@ Answer:"""
                 current_query = self._refine_query(query, missing)
             else:
                 step("Scores below threshold — broadening retrieval…")
-                top_k = min(top_k + 3, max(self.collection.count(), 1))
+                top_k = min(top_k + 3, self.collection.count())
 
         return draft_answer

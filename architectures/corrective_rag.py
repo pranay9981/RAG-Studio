@@ -101,8 +101,9 @@ Output ONLY the rewritten query."""
 
     def generate_node(self, state: CRAGState) -> Dict:
         if self._on_step:
-            self._on_step(("step", "Generating answer with Gemini…"))
-        docs = "\n\n".join(state["documents"])
+            self._on_step(("step", "Generating with Llama 4 Scout…"))
+        # Truncate each doc and cap total to avoid Groq context window overflow
+        docs = "\n\n".join(d[:1500] for d in state["documents"])[:6000]
         prompt = f"""Answer the user's query using the following context.
 When the query asks to compare documents, use any [Source: ...] labels present to distinguish between them.
 

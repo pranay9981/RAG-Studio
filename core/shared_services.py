@@ -20,7 +20,7 @@ class SharedServices:
             max_tokens=1024,
         )
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        self.multilingual_embeddings = self.embeddings
+        self._multilingual_embeddings = None  # lazy-loaded on first use (BAAI/bge-m3)
         self.chroma_client = self._init_chroma_client()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000, chunk_overlap=200
@@ -48,6 +48,13 @@ class SharedServices:
                     return chromadb.EphemeralClient()
         return chromadb.EphemeralClient()
 
+    @property
+    def multilingual_embeddings(self):
+        if self._multilingual_embeddings is None:
+            print("[shared_services] Loading BAAI/bge-m3 multilingual embeddings (first use)…")
+            self._multilingual_embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+        return self._multilingual_embeddings
+
     # ── Document loading ──────────────────────────────────────────────────────
 
     def load_pdf(self, file_path: str) -> List[Document]:
@@ -62,22 +69,6 @@ class SharedServices:
         ]
 
     # ── Parent-child / windowed chunking ──────────────────────────────────────
-
-    def create_windowed_documents(
-        self, documents: List[Document], window: int = 1
-    ) -> List[Document]:
-        """Adds `window_text` metadata to each doc: the chunk plus its ±window neighbours.
-        This gives the LLM wider context without polluting retrieval embeddings."""
-        result = []
-        for i, doc in enumerate(documents):
-            start = max(0, i - window)
-            end = min(len(documents), i + window + 1)
-            window_text = " ".join(
-                documents[j].page_content for j in range(start, end)
-            )
-            new_meta = {**doc.metadata, "window_text": window_text[:4000]}
-            result.append(Document(page_content=doc.page_content, metadata=new_meta))
-        return result
 
     def create_parent_child_documents(self, documents: List[Document]) -> List[Document]:
         """Creates small child chunks (300 chars) for retrieval with the full parent (1000 chars) in metadata.

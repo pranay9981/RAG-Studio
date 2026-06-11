@@ -183,7 +183,7 @@ class HybridRAGPipeline:
         ]
         context = services.build_sourced_context(reranked_texts, meta_list)
 
-        step("Generating answer with Gemini…")
+        step("Generating with Llama 4 Scout…")
         prompt = f"""You are a helpful AI assistant. Answer the user's query using ONLY the provided context.
 When the query asks to compare or contrast documents, use the [Source: ...] labels to distinguish between them.
 

@@ -8,14 +8,16 @@ interface Props {
 }
 
 const PIPELINE_STEPS: Record<string, string[]> = {
-  '01 Hybrid RAG (Dense + Sparse)': ['Embed Query', 'Dense Retrieval', 'BM25 Retrieval', 'RRF Fusion (k=60)', 'Cross-Encoder Rerank', 'Context Eval', 'Gemini Generate'],
-  '02 Graph RAG (Knowledge Graphs)': ['Extract Entities', 'Graph Traversal', 'Dense Retrieval', 'Context Eval', 'Combine Context', 'Gemini Generate'],
-  '03 Agentic RAG (LangGraph)': ['Planner Agent', 'Route Decision', 'Vector / Web / Direct', 'Multi-hop Decompose', 'Reasoner Agent', 'Gemini Generate'],
-  '04 Corrective RAG (CRAG)': ['Retrieve', 'Evaluate Quality', 'CORRECT → Generate', 'AMBIGUOUS → Rewrite + Web', 'INCORRECT → Web Search', 'Gemini Generate'],
-  '05 Multimodal RAG (Vision + Text)': ['Embed Query', 'Retrieve Text + Images', 'Build Multimodal Prompt', 'Gemini Vision Generate'],
-  '06 Multilingual RAG (BGE-M3)': ['Cross-lingual Embed', 'Cross-lingual Retrieval', 'Cross-Encoder Rerank', 'Context Eval', 'Gemini Generate (same language)'],
-  '07 RAG-Fusion (Query Expansion)': ['Generate 4 Sub-queries', 'Retrieve for Each (×4)', 'RRF Fusion', 'Context Eval', 'Gemini Generate'],
-  '08 HyDE RAG (Hypothetical Document)': ['Generate Hypothetical Answer', 'Embed Hypothetical', 'Retrieve Real Docs', 'Context Eval', 'Gemini Generate'],
+  '01 Hybrid RAG (Dense + Sparse)': ['Embed Query', 'Dense Retrieval', 'BM25 Retrieval', 'RRF Fusion (k=60)', 'Cross-Encoder Rerank', 'Context Eval', 'Llama 4 Scout Generate'],
+  '02 Graph RAG (Knowledge Graphs)': ['Extract Entities', 'Graph Traversal', 'Dense Retrieval', 'Context Eval', 'Combine Context', 'Llama 4 Scout Generate'],
+  '03 Agentic RAG (LangGraph)': ['Planner Agent', 'Route Decision', 'Vector / Web / Direct', 'Multi-hop Decompose', 'Reasoner Agent', 'Llama 4 Scout Generate'],
+  '04 Corrective RAG (CRAG)': ['Retrieve', 'Evaluate Quality', 'CORRECT → Generate', 'AMBIGUOUS → Rewrite + Web', 'INCORRECT → Web Search', 'Llama 4 Scout Generate'],
+  '05 Multimodal RAG (Vision + Text)': ['Embed Query', 'Retrieve Text + Images', 'Build Multimodal Prompt', 'Llama 4 Scout Vision Generate'],
+  '06 Multilingual RAG (BGE-M3)': ['BGE-M3 Cross-lingual Embed', 'Cross-lingual Retrieval', 'Cross-Encoder Rerank', 'Context Eval', 'Llama 4 Scout Generate (same language)'],
+  '07 RAG-Fusion (Query Expansion)': ['Generate 4 Sub-queries', 'Retrieve for Each (×4)', 'RRF Fusion', 'Context Eval', 'Llama 4 Scout Generate'],
+  '08 HyDE RAG (Hypothetical Document)': ['Generate Hypothetical Answer', 'Embed Hypothetical', 'Retrieve Real Docs', 'Context Eval', 'Llama 4 Scout Generate'],
+  '09 Structured RAG (CSV/Excel)': ['Parse CSV / Excel → DataFrame', 'Text-to-Pandas Prompt', 'Execute Pandas Code', 'Vector Retrieval (fallback)', 'Combine Structured + Vector', 'Llama 4 Scout Generate'],
+  '10 Self-RAG (Reflection + Critique)': ['Retrieve top-7', '[IsRel] Grade Relevance', 'Filter Irrelevant Docs', 'Generate Draft (silent)', '[IsSup] Faithfulness Check', '[IsUse] Completeness Check', 'Refine Query if below threshold', 'Loop 2 Retrieve + Generate', 'Llama 4 Scout Stream'],
 }
 
 const ADAPTIVE_FEATURES = [

@@ -12,6 +12,8 @@ services:
     volumes:
       # Persist ChromaDB vector store across restarts
       - chroma_data:/app/chroma_db
+      # Persist analytics/feedback/cache SQLite DB across restarts
+      - adaptive_data:/app/adaptive_data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
@@ -35,4 +37,6 @@ services:
 
 volumes:
   chroma_data:
+    driver: local
+  adaptive_data:
     driver: local

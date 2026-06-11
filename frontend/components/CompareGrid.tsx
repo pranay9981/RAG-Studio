@@ -49,7 +49,7 @@ export default function CompareGrid({ results, architectures, loading }: Props) 
     return (
       <div className="flex items-center justify-center py-12 gap-3 text-slate-400">
         <Loader2 size={18} className="animate-spin" />
-        <span className="text-sm">Running all 8 architectures…</span>
+        <span className="text-sm">Running all 10 architectures…</span>
       </div>
     )
   }
