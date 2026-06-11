@@ -14,10 +14,19 @@ import ArchExplainer from '@/components/ArchExplainer'
 import {
   getArchitectures, streamQuery, compareAll, evaluateAnswer,
   resetSession, getGraphHtml, submitFeedback, getAnalytics, getConfigStatus,
-  listDocuments, getHistory,
+  listDocuments, getHistory, clearCache,
 } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
+
+function downloadMd(content: string, filename: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filename}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 const SESSION_ID = 'default'
 const GRAPH_ARCH = '02 Graph RAG (Knowledge Graphs)'
@@ -243,15 +252,50 @@ export default function Page() {
     }))
   }, [])
 
-  const handleExport = () => {
-    const md = currentMessages
-      .map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
-      .join('\n\n---\n\n')
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
-    a.download = `rag-chat-${compareMode ? 'compare' : selectedArch.slice(0, 20)}.md`
-    a.click()
-  }
+  const handleExportCurrentChat = useCallback(() => {
+    if (!currentMessages.length) return
+    const title = compareMode ? 'Compare Mode' : selectedArch
+    const md = `# RAG Studio — ${title}\n\n` +
+      currentMessages
+        .map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
+        .join('\n\n---\n\n')
+    downloadMd(md, `rag-${title.slice(0, 20).replace(/\s+/g, '-').toLowerCase()}`)
+  }, [currentMessages, compareMode, selectedArch])
+
+  const handleExportAllChats = useCallback(() => {
+    const sections: string[] = []
+    for (const [key, msgs] of Object.entries(allMessages)) {
+      if (!msgs.length) continue
+      const title = key === COMPARE_KEY ? 'Compare Mode' : key
+      sections.push(
+        `# ${title}\n\n` +
+        msgs.map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
+          .join('\n\n---\n\n')
+      )
+    }
+    if (!sections.length) return
+    downloadMd(sections.join('\n\n\n---\n\n\n'), 'rag-all-chats')
+  }, [allMessages])
+
+  const handleExportCompare = useCallback(() => {
+    if (!currentCompareResults.length) return
+    const compareMsgs = allMessages[COMPARE_KEY] ?? []
+    const lastUserMsg = [...compareMsgs].reverse().find(m => m.role === 'user')
+    const query = lastUserMsg?.content ?? 'Query'
+    const md = `# Compare Results\n\n**Query:** ${query}\n\n` +
+      currentCompareResults.map(r => {
+        const evalStr = r.eval
+          ? `\n\n**Eval:** Faithful ${r.eval.faithfulness}/10 · Relevant ${r.eval.relevance}/10 · Precision ${r.eval.context_precision}/10 · Recall ${r.eval.context_recall}/10`
+          : ''
+        const errStr = r.error ? `\n\n⚠️ Error: ${r.error}` : ''
+        return `## ${r.arch_key}\n\n*${r.elapsed}s*\n\n${r.answer || '(no answer)'}${evalStr}${errStr}`
+      }).join('\n\n---\n\n')
+    downloadMd(md, 'rag-compare-results')
+  }, [currentCompareResults, allMessages])
+
+  const handleClearCache = useCallback(async () => {
+    try { await clearCache() } catch {}
+  }, [])
 
   const showGraphBtn = selectedArch === GRAPH_ARCH && ingestedArchs.has(GRAPH_ARCH) && !compareMode
   const isEmpty = currentMessages.length === 0 && !isStreaming && currentCompareResults.length === 0
@@ -272,7 +316,12 @@ export default function Page() {
         onEvalToggle={() => setEnableEval(o => !o)}
         onClearChat={handleClearChat}
         onReset={handleReset}
-        onExport={handleExport}
+        exportOptions={[
+          { label: 'Current Chat', fn: handleExportCurrentChat },
+          { label: 'All Chats', fn: handleExportAllChats },
+          { label: 'Compare Results', fn: handleExportCompare },
+        ]}
+        onClearCache={handleClearCache}
         onAnalytics={handleOpenAnalytics}
         onSettings={() => setShowApiKey(true)}
       >

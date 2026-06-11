@@ -141,6 +141,12 @@ class AdaptiveDB:
             ).fetchone()
         return row[0] if row else 0
 
+    def clear_cache(self) -> int:
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM query_cache")
+            self.conn.commit()
+            return cur.rowcount
+
     # ── Analytics ─────────────────────────────────────────────────────────────
 
     def store_query_analytics(

@@ -1,7 +1,12 @@
 'use client'
-import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Key } from 'lucide-react'
-import { useState } from 'react'
+import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Key, Database } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
 import type { ArchInfo, DocItem, HistoryItem } from '@/lib/types'
+
+interface ExportOption {
+  label: string
+  fn: () => void
+}
 
 interface Props {
   architectures: ArchInfo[]
@@ -17,7 +22,8 @@ interface Props {
   onEvalToggle: () => void
   onClearChat: () => void
   onReset: () => void
-  onExport: () => void
+  exportOptions: ExportOption[]
+  onClearCache: () => void
   onAnalytics: () => void
   onSettings: () => void
   children: React.ReactNode
@@ -26,10 +32,31 @@ interface Props {
 export default function Sidebar({
   architectures, selectedArch, compareMode, enableEval, ingestedArchs,
   messageCounts, docLibrary, history,
-  onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset, onExport,
-  onAnalytics, onSettings, children,
+  onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset,
+  exportOptions, onClearCache, onAnalytics, onSettings, children,
 }: Props) {
   const [histOpen, setHistOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [cacheFeedback, setCacheFeedback] = useState(false)
+  const exportRef = useRef<HTMLDivElement>(null)
+
+  // Close export dropdown when clicking outside
+  useEffect(() => {
+    if (!exportOpen) return
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [exportOpen])
+
+  const handleClearCacheClick = () => {
+    onClearCache()
+    setCacheFeedback(true)
+    setTimeout(() => setCacheFeedback(false), 1500)
+  }
 
   return (
     <aside className="w-72 bg-[#0d0d18] border-r border-white/[0.06] flex flex-col overflow-hidden flex-shrink-0">
@@ -114,22 +141,56 @@ export default function Sidebar({
 
       {/* Actions */}
       <div className="px-3 py-3 border-t border-white/[0.06]">
-        <div className="grid grid-cols-5 gap-1 mb-1.5">
-          {[
-            { icon: <Trash2 size={12} />, label: 'Clear', fn: onClearChat },
-            { icon: <RotateCcw size={12} />, label: 'Reset', fn: onReset },
-            { icon: <Download size={12} />, label: 'Export', fn: onExport },
-            { icon: <BarChart2 size={12} />, label: 'Stats', fn: onAnalytics },
-            { icon: <Key size={12} />, label: 'API Key', fn: onSettings },
-          ].map(({ icon, label, fn }) => (
-            <button
-              key={label}
-              onClick={fn}
-              className="flex flex-col items-center gap-1 py-2 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-colors text-[10px]"
-            >
-              {icon}{label}
-            </button>
-          ))}
+        {/* Export dropdown */}
+        <div ref={exportRef} className="relative">
+          {exportOpen && (
+            <div className="absolute bottom-full mb-1.5 left-0 right-0 bg-[#13131f] border border-white/[0.1] rounded-lg overflow-hidden shadow-xl z-20">
+              <p className="px-3 py-1.5 text-[10px] font-medium text-slate-500 uppercase tracking-wider border-b border-white/[0.06]">Export as Markdown</p>
+              {exportOptions.map(opt => (
+                <button
+                  key={opt.label}
+                  onClick={() => { opt.fn(); setExportOpen(false) }}
+                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-indigo-500/10 hover:text-indigo-200 transition-colors flex items-center gap-2"
+                >
+                  <Download size={10} className="text-slate-500" />
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-1">
+            {[
+              { icon: <Trash2 size={12} />, label: 'Clear', fn: onClearChat, active: false },
+              { icon: <RotateCcw size={12} />, label: 'Reset', fn: onReset, active: false },
+              {
+                icon: <Download size={12} />,
+                label: 'Export',
+                fn: () => setExportOpen(o => !o),
+                active: exportOpen,
+              },
+              {
+                icon: <Database size={12} />,
+                label: cacheFeedback ? 'Cleared!' : 'Cache',
+                fn: handleClearCacheClick,
+                active: cacheFeedback,
+              },
+              { icon: <BarChart2 size={12} />, label: 'Stats', fn: onAnalytics, active: false },
+              { icon: <Key size={12} />, label: 'API Key', fn: onSettings, active: false },
+            ].map(({ icon, label, fn, active }) => (
+              <button
+                key={label}
+                onClick={fn}
+                className={`flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] ${
+                  active
+                    ? 'text-indigo-300 bg-indigo-500/10 border border-indigo-500/20'
+                    : 'text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] border border-transparent'
+                }`}
+              >
+                {icon}{label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </aside>

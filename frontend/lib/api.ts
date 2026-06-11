@@ -192,6 +192,12 @@ export async function getHistory(): Promise<HistoryItem[]> {
   }
 }
 
+export async function clearCache(): Promise<{ deleted: number }> {
+  const r = await fetch(`${BASE}/api/cache`, { method: 'DELETE' })
+  if (!r.ok) throw new Error('Clear cache failed')
+  return r.json()
+}
+
 export async function setApiKey(apiKey: string): Promise<{ status: string }> {
   const r = await fetch(`${BASE}/api/config/apikey`, {
     method: 'POST',

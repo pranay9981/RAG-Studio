@@ -664,6 +664,12 @@ async def delete_document(request: DeleteDocumentRequest):
     return {"deleted": total_deleted, "source": request.source}
 
 
+@app.delete("/api/cache")
+async def clear_cache():
+    deleted = adaptive_db.clear_cache()
+    return {"deleted": deleted, "status": "ok"}
+
+
 @app.get("/api/config/status")
 async def get_config_status():
     return {"has_key": bool(os.environ.get("GROQ_API_KEY", "").strip())}
