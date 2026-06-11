@@ -95,3 +95,6 @@ frontend/.vercel/
 chroma_db/
 adaptive.db
 adaptive_data/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
