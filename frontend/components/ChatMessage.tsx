@@ -68,7 +68,8 @@ export default function ChatMessage({ message, archIcon, onFeedback }: Props) {
         {onFeedback && (
           <div className="flex items-center gap-1.5 mt-2">
             <button
-              onClick={() => onFeedback(message.id, 1)}
+              onClick={() => onFeedback(message.id, message.feedback === 'up' ? 0 : 1)}
+              title={message.feedback === 'up' ? 'Remove rating' : 'Helpful'}
               className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] transition-all ${
                 message.feedback === 'up'
                   ? 'text-emerald-400 bg-emerald-400/12 border border-emerald-400/25'
@@ -79,7 +80,8 @@ export default function ChatMessage({ message, archIcon, onFeedback }: Props) {
               {message.feedback === 'up' && <span>Helpful</span>}
             </button>
             <button
-              onClick={() => onFeedback(message.id, -1)}
+              onClick={() => onFeedback(message.id, message.feedback === 'down' ? 0 : -1)}
+              title={message.feedback === 'down' ? 'Remove rating' : 'Unhelpful'}
               className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] transition-all ${
                 message.feedback === 'down'
                   ? 'text-red-400 bg-red-400/12 border border-red-400/25'

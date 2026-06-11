@@ -148,7 +148,9 @@ export default function Page() {
       setAllMessages(prev => ({
         ...prev,
         [chatKey]: (prev[chatKey] ?? []).map(m =>
-          m.id === messageId ? { ...m, feedback: rating > 0 ? 'up' : 'down' } : m
+          m.id === messageId
+            ? { ...m, feedback: rating === 0 ? undefined : rating > 0 ? 'up' : 'down' }
+            : m
         ),
       }))
     } catch {}

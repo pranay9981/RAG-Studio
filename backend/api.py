@@ -573,8 +573,11 @@ Do not omit any key. Use 0 if unsure."""
 
 @app.post("/api/feedback")
 async def submit_feedback(request: FeedbackRequest):
+    if request.rating == 0:
+        adaptive_db.delete_feedback(request.query, request.arch_key)
+        return {"status": "cleared"}
     if request.rating not in (1, -1):
-        raise HTTPException(status_code=400, detail="Rating must be 1 (up) or -1 (down)")
+        raise HTTPException(status_code=400, detail="Rating must be 1 (up), -1 (down), or 0 (unmark)")
     adaptive_db.store_feedback(
         request.query, request.arch_key, request.chunk_ids, request.rating
     )

@@ -64,6 +64,14 @@ class AdaptiveDB:
             )
             self.conn.commit()
 
+    def delete_feedback(self, query: str, arch_key: str):
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM feedback WHERE query=? AND arch_key=?",
+                (query, arch_key),
+            )
+            self.conn.commit()
+
     # ── Semantic cache ────────────────────────────────────────────────────────
 
     def find_similar_query(

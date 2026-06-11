@@ -7,7 +7,7 @@ interface Props {
   onClose: () => void
 }
 
-function Bar({ value, max = 10, color = 'bg-indigo-500' }: { value: number | null | undefined; max?: number; color?: string }) {
+function Bar({ value, max = 10, color = 'bg-violet-500' }: { value: number | null | undefined; max?: number; color?: string }) {
   if (value == null) return <span className="text-[10px] text-slate-600">n/a</span>
   const pct = Math.min(100, (value / max) * 100)
   return (
