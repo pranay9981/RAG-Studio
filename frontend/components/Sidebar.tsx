@@ -1,12 +1,9 @@
 'use client'
-import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Key, Database } from 'lucide-react'
+import { Trash2, RotateCcw, Download, History, ChevronDown, ChevronUp, BarChart2, Key, Database, Zap } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import type { ArchInfo, DocItem, HistoryItem } from '@/lib/types'
 
-interface ExportOption {
-  label: string
-  fn: () => void
-}
+interface ExportOption { label: string; fn: () => void }
 
 interface Props {
   architectures: ArchInfo[]
@@ -40,16 +37,13 @@ export default function Sidebar({
   const [cacheFeedback, setCacheFeedback] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
 
-  // Close export dropdown when clicking outside
   useEffect(() => {
     if (!exportOpen) return
-    const handler = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
-        setExportOpen(false)
-      }
+    const h = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setExportOpen(false)
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
   }, [exportOpen])
 
   const handleClearCacheClick = () => {
@@ -59,78 +53,96 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="w-72 bg-[#0d0d18] border-r border-white/[0.06] flex flex-col overflow-hidden flex-shrink-0">
-      {/* Header */}
-      <div className="px-4 py-3.5 border-b border-white/[0.06] flex items-center gap-2.5">
-        <div className="w-6 h-6 rounded bg-indigo-500/20 flex items-center justify-center text-xs">⚡</div>
-        <span className="text-sm font-semibold text-white/90 tracking-tight">RAG Studio</span>
-        <span className="ml-auto text-[10px] font-mono text-slate-600 bg-white/[0.04] px-1.5 py-0.5 rounded">v4</span>
+    <aside className="w-[260px] bg-surface border-r border-white/[0.06] flex flex-col overflow-hidden flex-shrink-0">
+      {/* Logo / Brand */}
+      <div className="px-4 py-4 border-b border-white/[0.06] flex items-center gap-3">
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-violet-700 flex items-center justify-center shadow-glow-sm flex-shrink-0">
+          <Zap size={13} className="text-white" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-white tracking-tight">RAG Studio</p>
+          <p className="text-[10px] text-slate-600">10 Architectures</p>
+        </div>
+        <span className="text-[9px] font-mono font-bold text-violet-500 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-md">v4</span>
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Architecture selector */}
-        <div className="px-3 py-3 border-b border-white/[0.06]">
-          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-2 px-1">Architecture</p>
+        {/* Architecture list */}
+        <div className="px-3 py-3 border-b border-white/[0.05]">
+          <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 px-1">Architecture</p>
           <div className="space-y-0.5">
-            {architectures.map(a => (
-              <button
-                key={a.key}
-                onClick={() => onSelectArch(a.key)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all text-xs ${
-                  selectedArch === a.key
-                    ? 'bg-indigo-500/15 border border-indigo-500/25 text-indigo-200'
-                    : 'text-slate-400 hover:bg-white/[0.04] hover:text-slate-200 border border-transparent'
-                }`}
-              >
-                <span className="text-sm flex-shrink-0">{a.icon}</span>
-                <span className="truncate flex-1">{a.key}</span>
-                <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
-                  {(messageCounts[a.key] ?? 0) > 0 && (
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/20">
-                      {messageCounts[a.key]}
-                    </span>
+            {architectures.map(a => {
+              const active = selectedArch === a.key
+              const count = messageCounts[a.key] ?? 0
+              const ingested = ingestedArchs.has(a.key)
+              return (
+                <button
+                  key={a.key}
+                  onClick={() => onSelectArch(a.key)}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition-all text-xs relative ${
+                    active
+                      ? 'bg-violet-500/15 border border-violet-500/30 text-violet-200'
+                      : 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-300 border border-transparent'
+                  }`}
+                >
+                  {active && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-violet-400 rounded-r-full" />
                   )}
-                  {ingestedArchs.has(a.key) && <span className="w-1.5 h-1.5 rounded-full bg-green-400" />}
-                </div>
-              </button>
-            ))}
+                  <span className="text-sm flex-shrink-0 opacity-80">{a.icon}</span>
+                  <span className="truncate flex-1 font-medium">{a.key.split(' ').slice(1).join(' ')}</span>
+                  <div className="flex items-center gap-1.5 flex-shrink-0 ml-auto">
+                    {count > 0 && (
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-violet-500/30 text-violet-300' : 'bg-white/[0.06] text-slate-500'}`}>
+                        {count}
+                      </span>
+                    )}
+                    {ingested && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
 
         {/* Toggles */}
-        <div className="px-4 py-3 border-b border-white/[0.06] space-y-2.5">
+        <div className="px-4 py-3 border-b border-white/[0.05] space-y-3">
           {[
-            { label: `Compare (${architectures.length})`, val: compareMode, fn: onCompareToggle },
+            { label: `Compare All (${architectures.length})`, val: compareMode, fn: onCompareToggle },
             { label: 'RAG Evaluation', val: enableEval, fn: onEvalToggle },
           ].map(({ label, val, fn }) => (
-            <label key={label} className="flex items-center justify-between cursor-pointer">
-              <span className="text-xs text-slate-400">{label}</span>
-              <button onClick={fn} className={`w-9 h-5 rounded-full transition-colors ${val ? 'bg-indigo-500' : 'bg-white/10'} relative flex-shrink-0`}>
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${val ? 'left-4' : 'left-0.5'}`} />
+            <label key={label} className="flex items-center justify-between cursor-pointer group">
+              <span className="text-xs text-slate-500 group-hover:text-slate-400 transition-colors">{label}</span>
+              <button
+                onClick={fn}
+                className={`relative w-9 h-5 rounded-full transition-all duration-200 flex-shrink-0 ${val ? 'bg-violet-600' : 'bg-white/[0.08]'}`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${val ? 'left-4' : 'left-0.5'}`} />
               </button>
             </label>
           ))}
         </div>
 
-        {/* Document manager slot */}
-        <div className="border-b border-white/[0.06]">{children}</div>
+        {/* Document manager */}
+        <div className="border-b border-white/[0.05]">{children}</div>
 
         {/* History */}
         {history.length > 0 && (
-          <div className="border-b border-white/[0.06]">
+          <div className="border-b border-white/[0.05]">
             <button
               onClick={() => setHistOpen(o => !o)}
-              className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-slate-400 hover:text-slate-200"
+              className="w-full flex items-center justify-between px-4 py-2.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
             >
-              <span className="flex items-center gap-1.5"><History size={11} /> History ({history.length})</span>
+              <span className="flex items-center gap-1.5 font-medium">
+                <History size={11} /> Recent ({history.length})
+              </span>
               {histOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
             </button>
             {histOpen && (
-              <div className="px-4 pb-3 space-y-2">
-                {[...history].reverse().slice(0, 10).map((h, i) => (
-                  <div key={i} className="text-xs">
-                    <p className="text-slate-300 truncate">{h.query}</p>
-                    <p className="text-slate-600">{h.arch.split(' ')[0]} · {h.elapsed.toFixed(1)}s</p>
+              <div className="px-4 pb-3 space-y-2.5">
+                {[...history].reverse().slice(0, 8).map((h, i) => (
+                  <div key={i} className="space-y-0.5">
+                    <p className="text-xs text-slate-400 truncate leading-relaxed">{h.query}</p>
+                    <p className="text-[10px] text-slate-600">{h.arch.split(' ')[0]} · {h.elapsed.toFixed(1)}s</p>
                   </div>
                 ))}
               </div>
@@ -141,18 +153,17 @@ export default function Sidebar({
 
       {/* Actions */}
       <div className="px-3 py-3 border-t border-white/[0.06]">
-        {/* Export dropdown */}
         <div ref={exportRef} className="relative">
           {exportOpen && (
-            <div className="absolute bottom-full mb-1.5 left-0 right-0 bg-[#13131f] border border-white/[0.1] rounded-lg overflow-hidden shadow-xl z-20">
-              <p className="px-3 py-1.5 text-[10px] font-medium text-slate-500 uppercase tracking-wider border-b border-white/[0.06]">Export as Markdown</p>
+            <div className="absolute bottom-full mb-2 left-0 right-0 bg-[#0f0f22] border border-white/[0.1] rounded-xl overflow-hidden shadow-glow z-20 animate-slide-up">
+              <p className="px-3 py-2 text-[10px] font-bold text-slate-600 uppercase tracking-widest border-b border-white/[0.06]">Export as .md</p>
               {exportOptions.map(opt => (
                 <button
                   key={opt.label}
                   onClick={() => { opt.fn(); setExportOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-indigo-500/10 hover:text-indigo-200 transition-colors flex items-center gap-2"
+                  className="w-full text-left px-3 py-2.5 text-xs text-slate-400 hover:bg-violet-500/10 hover:text-violet-300 transition-colors flex items-center gap-2"
                 >
-                  <Download size={10} className="text-slate-500" />
+                  <Download size={10} className="text-slate-600" />
                   {opt.label}
                 </button>
               ))}
@@ -161,30 +172,22 @@ export default function Sidebar({
 
           <div className="grid grid-cols-3 gap-1">
             {[
-              { icon: <Trash2 size={12} />, label: 'Clear', fn: onClearChat, active: false },
-              { icon: <RotateCcw size={12} />, label: 'Reset', fn: onReset, active: false },
-              {
-                icon: <Download size={12} />,
-                label: 'Export',
-                fn: () => setExportOpen(o => !o),
-                active: exportOpen,
-              },
-              {
-                icon: <Database size={12} />,
-                label: cacheFeedback ? 'Cleared!' : 'Cache',
-                fn: handleClearCacheClick,
-                active: cacheFeedback,
-              },
-              { icon: <BarChart2 size={12} />, label: 'Stats', fn: onAnalytics, active: false },
-              { icon: <Key size={12} />, label: 'API Key', fn: onSettings, active: false },
-            ].map(({ icon, label, fn, active }) => (
+              { icon: <Trash2 size={12} />, label: 'Clear', fn: onClearChat, extra: '' },
+              { icon: <RotateCcw size={12} />, label: 'Reset', fn: onReset, extra: '' },
+              { icon: <Download size={12} />, label: 'Export', fn: () => setExportOpen(o => !o), extra: exportOpen ? 'active' : '' },
+              { icon: <Database size={12} />, label: cacheFeedback ? 'Cleared!' : 'Cache', fn: handleClearCacheClick, extra: cacheFeedback ? 'success' : '' },
+              { icon: <BarChart2 size={12} />, label: 'Stats', fn: onAnalytics, extra: '' },
+              { icon: <Key size={12} />, label: 'API Key', fn: onSettings, extra: '' },
+            ].map(({ icon, label, fn, extra }) => (
               <button
                 key={label}
                 onClick={fn}
-                className={`flex flex-col items-center gap-1 py-2 rounded-lg transition-colors text-[10px] ${
-                  active
-                    ? 'text-indigo-300 bg-indigo-500/10 border border-indigo-500/20'
-                    : 'text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] border border-transparent'
+                className={`flex flex-col items-center gap-1 py-2.5 rounded-xl text-[10px] font-medium transition-all border ${
+                  extra === 'active'
+                    ? 'text-violet-300 bg-violet-500/12 border-violet-500/25'
+                    : extra === 'success'
+                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                    : 'text-slate-600 hover:text-slate-300 hover:bg-white/[0.05] border-transparent'
                 }`}
               >
                 {icon}{label}

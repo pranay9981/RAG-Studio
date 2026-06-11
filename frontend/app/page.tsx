@@ -352,7 +352,7 @@ export default function Page() {
               {showGraphBtn && (
                 <button
                   onClick={handleOpenGraph}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/25 text-indigo-300 text-xs font-medium hover:bg-indigo-500/20 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/25 text-violet-300 text-xs font-medium hover:bg-violet-500/20 transition-colors"
                 >
                   <Network size={13} />
                   Knowledge Graph
@@ -362,22 +362,37 @@ export default function Page() {
           </div>
         )}
         {compareMode && (
-          <div className="px-6 py-3 border-b border-white/[0.06] bg-indigo-500/5 flex items-center gap-2">
-            <span className="text-xs font-medium text-indigo-300">🔍 Compare Mode — all {archs.length} architectures run simultaneously</span>
+          <div className="px-6 py-3 border-b border-white/[0.06] bg-violet-500/[0.06] flex items-center gap-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse-slow" />
+            <span className="text-xs font-semibold text-violet-300">Compare Mode</span>
+            <span className="text-xs text-slate-500">— all {archs.length} architectures run simultaneously</span>
           </div>
         )}
 
         {/* Chat area */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           {isEmpty && (
-            <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-              <p className="text-4xl">⚡</p>
-              <p className="text-lg font-semibold text-slate-300">RAG Studio</p>
-              <p className="text-sm text-slate-500 max-w-sm">
-                {compareMode
-                  ? 'Upload a document, then ask a question to compare all architectures side by side.'
-                  : 'Upload a PDF, TXT, CSV, DOCX, image, or paste a URL — then start asking questions.'}
-              </p>
+            <div className="flex flex-col items-center justify-center h-full gap-5 text-center select-none">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600/30 to-violet-900/20 border border-violet-500/25 flex items-center justify-center shadow-glow">
+                  <span className="text-2xl">⚡</span>
+                </div>
+                <div className="absolute inset-0 rounded-2xl bg-violet-500/10 blur-xl -z-10" />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-base font-bold text-slate-200">RAG Studio</p>
+                <p className="text-sm text-slate-500 max-w-xs leading-relaxed">
+                  {compareMode
+                    ? 'Upload a document, then ask a question to compare all 10 architectures side by side.'
+                    : 'Upload a document or paste a URL, then start asking questions.'}
+                </p>
+              </div>
+              {ingestedArchs.size === 0 && (
+                <div className="flex items-center gap-2 text-xs text-slate-600 bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                  Upload a document from the sidebar to begin
+                </div>
+              )}
             </div>
           )}
 
@@ -412,36 +427,39 @@ export default function Page() {
         </div>
 
         {/* Input */}
-        <div className="px-6 py-4 border-t border-white/[0.06] bg-[#0d0d18]">
+        <div className="px-6 py-4 border-t border-white/[0.06] bg-surface">
           <div className="flex items-end gap-3 max-w-4xl mx-auto">
-            <textarea
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              onInput={e => {
-                const el = e.currentTarget
-                el.style.height = 'auto'
-                el.style.height = Math.min(el.scrollHeight, 120) + 'px'
-              }}
-              placeholder={
-                ingestedArchs.size === 0
-                  ? 'Upload a document first…'
-                  : 'Ask a question… (Enter to send, Shift+Enter for newline)'
-              }
-              rows={1}
-              className="flex-1 resize-none bg-white/[0.04] border border-white/[0.08] rounded-xl px-4 py-3 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-indigo-500/40 transition-colors leading-relaxed"
-              style={{ maxHeight: '120px', overflowY: 'auto' }}
-            />
+            <div className="flex-1 relative">
+              <textarea
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+                onInput={e => {
+                  const el = e.currentTarget
+                  el.style.height = 'auto'
+                  el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+                }}
+                placeholder={
+                  ingestedArchs.size === 0
+                    ? 'Upload a document first…'
+                    : 'Ask a question… (Enter ↵ to send)'
+                }
+                rows={1}
+                className="w-full resize-none bg-white/[0.04] border border-white/[0.08] rounded-2xl px-4 py-3 pr-4 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-violet-500/40 focus:bg-violet-500/[0.03] transition-all leading-relaxed"
+                style={{ maxHeight: '120px', overflowY: 'auto' }}
+              />
+            </div>
             <button
               onClick={handleSend}
               disabled={!input.trim() || isStreaming || compareLoading}
-              className="flex-shrink-0 w-10 h-10 rounded-xl bg-indigo-500 hover:bg-accent-h disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center"
+              className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-violet-700 hover:from-violet-500 hover:to-violet-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center shadow-glow-sm"
             >
               {isStreaming || compareLoading
-                ? <Loader2 size={16} className="animate-spin text-white" />
-                : <Send size={16} className="text-white" />}
+                ? <Loader2 size={15} className="animate-spin text-white" />
+                : <Send size={15} className="text-white" />}
             </button>
           </div>
+          <p className="text-center text-[10px] text-slate-700 mt-2">Shift+Enter for new line</p>
         </div>
       </div>
 
@@ -455,7 +473,7 @@ export default function Page() {
           >
             <div className="flex items-center justify-between px-5 py-3 border-b border-white/[0.06]">
               <div className="flex items-center gap-2">
-                <Network size={15} className="text-indigo-400" />
+                <Network size={15} className="text-violet-400" />
                 <span className="text-sm font-semibold text-slate-200">Knowledge Graph</span>
                 <span className="text-xs text-slate-500">Graph RAG entity relationships</span>
               </div>
