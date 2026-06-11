@@ -70,7 +70,9 @@ class SelfRAGPipeline:
         if not docs:
             return []
         doc_list = "\n".join(f"[{i}]: {d[:250]}" for i, d in enumerate(docs))
-        prompt = f"""For each document chunk, output true if it is relevant to the query, false otherwise.
+        prompt = f"""For each document chunk, decide if it contains ANY information that could help answer the query.
+Be generous — mark true if the chunk is even partially useful or topically related.
+Only mark false if the chunk is completely unrelated to the query topic.
 Output ONLY a JSON array of booleans, one per document in order.
 
 Query: {query}
@@ -169,7 +171,13 @@ Output ONLY the refined query (1–2 sentences):"""
                 relevance = self._grade_relevance(query, new_docs)
                 rel_docs = [d for d, r in zip(new_docs, relevance) if r]
                 rel_metas = [m for m, r in zip(new_metas, relevance) if r]
-                step(f"Relevance filter: {len(rel_docs)}/{len(new_docs)} docs kept")
+                if not rel_docs:
+                    # Grader rejected everything — use top 3 rather than falling back to web
+                    rel_docs = new_docs[:3]
+                    rel_metas = new_metas[:3]
+                    step(f"All docs graded low-relevance — using top 3 as fallback")
+                else:
+                    step(f"Relevance filter: {len(rel_docs)}/{len(new_docs)} docs kept")
                 all_docs.extend(rel_docs)
                 all_metas.extend(rel_metas)
 

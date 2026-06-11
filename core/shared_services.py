@@ -103,9 +103,9 @@ class SharedServices:
 
     def get_context_text(self, doc_text: str, meta: Optional[dict]) -> str:
         """Returns the richest available context: parent_text > window_text > raw chunk."""
-        if meta and "parent_text" in meta:
+        if meta and meta.get("parent_text"):
             return meta["parent_text"]
-        if meta and "window_text" in meta:
+        if meta and meta.get("window_text"):
             return meta["window_text"]
         return doc_text
 
