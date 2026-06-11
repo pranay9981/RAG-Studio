@@ -161,10 +161,9 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
         step("Vector retrieval from ChromaDB…")
         query_embedding = services.embeddings.embed_query(query)
         n = min(5, self.collection.count())
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n,
-            include=["documents", "metadatas"],
+        results, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[query_embedding], n_results=n, include=["documents", "metadatas"],
         )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)

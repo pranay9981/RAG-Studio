@@ -75,12 +75,10 @@ class MultilingualRAGPipeline:
 
         step("Cross-lingual retrieval from ChromaDB…")
         n = min(8, self.collection.count())
-        with services._chroma_lock:
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n,
-                include=["documents", "metadatas"],
-            )
+        results, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[query_embedding], n_results=n, include=["documents", "metadatas"],
+        )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
 

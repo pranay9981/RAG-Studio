@@ -1,4 +1,5 @@
 import os
+import time
 import shutil
 from typing import List, Any, Optional
 import threading
@@ -49,6 +50,25 @@ class SharedServices:
     @llm.setter
     def llm(self, value):
         self._llm = value
+
+    def chroma_query(self, collection, collection_name: str, **kwargs):
+        """Thread-safe ChromaDB query with HNSW-error retry and collection refresh.
+
+        Returns (results, collection) — caller should update self.collection with
+        the returned collection in case it was refreshed.
+        """
+        for attempt in range(3):
+            try:
+                with self._chroma_lock:
+                    return collection.query(**kwargs), collection
+            except Exception as e:
+                err = str(e).lower()
+                if ("hnsw" in err or "nothing found on disk" in err) and attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
+                    collection = self.chroma_client.get_or_create_collection(collection_name)
+                    continue
+                raise
+        raise RuntimeError("ChromaDB HNSW error after 3 attempts")
 
     def _init_chroma_client(self):
         """PersistentClient with safe migration — wipes directory on HNSW corruption and retries."""

@@ -211,12 +211,10 @@ Query: {query}"""
         step("Dense retrieval from ChromaDB…")
         query_embedding = services.embeddings.embed_query(query)
         n = min(4, self.collection.count())
-        with services._chroma_lock:
-            dense_response = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n,
-                include=["documents", "metadatas"],
-            )
+        dense_response, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[query_embedding], n_results=n, include=["documents", "metadatas"],
+        )
         dense_docs = dense_response["documents"][0] if dense_response["documents"][0] else []
         dense_metas = dense_response["metadatas"][0] if dense_response["metadatas"] else [{}] * len(dense_docs)
 

@@ -1,5 +1,4 @@
 import uuid
-import time
 import threading
 from typing import List, Dict
 from rank_bm25 import BM25Okapi
@@ -110,25 +109,11 @@ class HybridRAGPipeline:
 
         step(f"Dense retrieval from ChromaDB (top {top_k})…")
         n = min(top_k * 2, self.collection.count())
-        dense_response = None
-        for _attempt in range(3):
-            try:
-                with services._chroma_lock:
-                    dense_response = self.collection.query(
-                        query_embeddings=[query_embedding],
-                        n_results=n,
-                        include=["documents", "metadatas", "distances"],
-                    )
-                break
-            except Exception as _e:
-                if "hnsw" in str(_e).lower() or "nothing found on disk" in str(_e).lower():
-                    if _attempt < 2:
-                        time.sleep(0.5 * (_attempt + 1))
-                        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-                        continue
-                raise
-        if dense_response is None:
-            return "Dense retrieval unavailable — please re-ingest the document."
+        dense_response, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[query_embedding], n_results=n,
+            include=["documents", "metadatas", "distances"],
+        )
         dense_results = [
             {
                 "id": dense_response["ids"][0][i],

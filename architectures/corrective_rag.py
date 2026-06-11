@@ -1,6 +1,5 @@
 from typing import List, Dict, TypedDict
 import uuid
-import time
 import threading
 from langchain_core.documents import Document
 from langgraph.graph import StateGraph, END
@@ -55,25 +54,10 @@ class CorrectiveRAGPipeline:
             return {"documents": []}
         query_embedding = services.embeddings.embed_query(query)
         n = min(4, self.collection.count())
-        results = None
-        for _attempt in range(3):
-            try:
-                with services._chroma_lock:
-                    results = self.collection.query(
-                        query_embeddings=[query_embedding],
-                        n_results=n,
-                        include=["documents", "metadatas"],
-                    )
-                break
-            except Exception as _e:
-                if "hnsw" in str(_e).lower() or "nothing found on disk" in str(_e).lower():
-                    if _attempt < 2:
-                        time.sleep(0.5 * (_attempt + 1))
-                        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-                        continue
-                raise
-        if results is None:
-            return {"documents": []}
+        results, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[query_embedding], n_results=n, include=["documents", "metadatas"],
+        )
         docs = results["documents"][0] if results["documents"][0] else []
         metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
         if self._on_step and docs:

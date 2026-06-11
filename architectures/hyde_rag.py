@@ -75,12 +75,10 @@ Passage:"""
 
         step("Retrieving real documents closest to hypothetical embedding…")
         n = min(top_k, self.collection.count())
-        with services._chroma_lock:
-            results = self.collection.query(
-                query_embeddings=[hyde_embedding],
-                n_results=n,
-                include=["documents", "metadatas"],
-            )
+        results, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[hyde_embedding], n_results=n, include=["documents", "metadatas"],
+        )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
 
@@ -91,12 +89,10 @@ Passage:"""
             step("Supplementing with direct query retrieval for broader source coverage…")
             direct_embedding = services.embeddings.embed_query(query)
             supp_n = min(top_k, total_docs)
-            with services._chroma_lock:
-                supp_results = self.collection.query(
-                    query_embeddings=[direct_embedding],
-                    n_results=supp_n,
-                    include=["documents", "metadatas"],
-                )
+            supp_results, self.collection = services.chroma_query(
+                self.collection, self.collection_name,
+                query_embeddings=[direct_embedding], n_results=supp_n, include=["documents", "metadatas"],
+            )
             supp_docs = supp_results["documents"][0] if supp_results.get("documents") and supp_results["documents"][0] else []
             supp_metas = supp_results["metadatas"][0] if supp_results.get("metadatas") and supp_results["metadatas"][0] else [{}] * len(supp_docs)
             existing_texts = set(docs)

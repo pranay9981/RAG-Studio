@@ -54,12 +54,10 @@ class AgenticRAGPipeline:
             return "No documents have been ingested yet.", []
         query_embedding = services.embeddings.embed_query(query)
         n = min(4, self.collection.count())
-        with services._chroma_lock:
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n,
-                include=["documents", "metadatas"],
-            )
+        results, self.collection = services.chroma_query(
+            self.collection, self.collection_name,
+            query_embeddings=[query_embedding], n_results=n, include=["documents", "metadatas"],
+        )
         docs = results["documents"][0] if results["documents"][0] else []
         metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
         sources = [

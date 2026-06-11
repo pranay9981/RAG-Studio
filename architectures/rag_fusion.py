@@ -86,12 +86,10 @@ Original query: {query}
             step(f"Retrieving for sub-query {i + 1}/{len(sub_queries)}: \"{preview}\"")
             q_embedding = services.embeddings.embed_query(sub_q)
             n = min(top_k, self.collection.count())
-            with services._chroma_lock:
-                results = self.collection.query(
-                    query_embeddings=[q_embedding],
-                    n_results=n,
-                    include=["documents", "metadatas"],
-                )
+            results, self.collection = services.chroma_query(
+                self.collection, self.collection_name,
+                query_embeddings=[q_embedding], n_results=n, include=["documents", "metadatas"],
+            )
             ranked = [
                 {
                     "id": results["ids"][0][j],
