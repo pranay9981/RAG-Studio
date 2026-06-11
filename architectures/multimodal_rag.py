@@ -56,7 +56,7 @@ class MultimodalRAGPipeline:
         with services._chroma_lock:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=3,
+                n_results=min(6, self.collection.count()),
                 include=["documents", "metadatas"],
             )
 
@@ -69,11 +69,13 @@ class MultimodalRAGPipeline:
         docs, metadatas = adaptive_db.apply_feedback_boost(docs, metadatas, self.arch_key)
 
         if on_step and docs:
-            sources = [
-                {"text": text[:300], "source": (meta or {}).get("source", "Unknown")}
-                for text, meta in zip(docs, metadatas)
-            ]
-            on_step(("sources", sources))
+            seen: dict = {}
+            for text, meta in zip(docs, metadatas):
+                src = (meta or {}).get("source", "Unknown")
+                lbl = src.split("/")[-1].split("\\")[-1]
+                if lbl not in seen:
+                    seen[lbl] = text[:300]
+            on_step(("sources", [{"text": t, "source": s} for s, t in seen.items()]))
 
         step("Building multimodal message (text + images)…")
         content = [
@@ -83,10 +85,21 @@ class MultimodalRAGPipeline:
             }
         ]
 
-        for idx, (doc_text, meta) in enumerate(zip(docs, metadatas)):
-            # Use window_text for richer context when available
+        # Deduplicate by source so each file appears once with its richest chunk
+        seen_sources: dict = {}
+        for doc_text, meta in zip(docs, metadatas):
+            source = (meta or {}).get("source", "Unknown")
+            label = source.split("/")[-1].split("\\")[-1]
             ctx_text = services.get_context_text(doc_text, meta)
-            content.append({"type": "text", "text": f"--- Document {idx + 1} ---\n{ctx_text}\n"})
+            if label not in seen_sources:
+                seen_sources[label] = (ctx_text, meta)
+            else:
+                # Keep the longer context for the same source
+                if len(ctx_text) > len(seen_sources[label][0]):
+                    seen_sources[label] = (ctx_text, meta)
+
+        for label, (ctx_text, meta) in seen_sources.items():
+            content.append({"type": "text", "text": f"[Source: {label}]\n{ctx_text}\n"})
             img_path = (meta or {}).get("image_path", "")
             if img_path and os.path.exists(img_path):
                 try:

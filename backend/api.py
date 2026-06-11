@@ -308,7 +308,7 @@ async def query_stream(
     # Check semantic cache
     try:
         query_embedding = services.embeddings.embed_query(query)
-        cached = adaptive_db.find_similar_query(query_embedding, arch_key)
+        cached = adaptive_db.find_similar_query(query_embedding, arch_key, query_text=query)
     except Exception:
         cached = None
         query_embedding = []  # empty list, not None — prevents None-type errors downstream

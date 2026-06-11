@@ -123,12 +123,10 @@ Answer:"""
         return {"documents": [text]}
 
     def route_evaluation(self, state: CRAGState) -> str:
-        if state["evaluation"] == "CORRECT":
+        if state["evaluation"] in ("CORRECT", "AMBIGUOUS"):  # use ingested docs for both
             return "generate_node"
-        elif state["evaluation"] == "INCORRECT":   # worst case → full rewrite + web
+        else:                                                  # INCORRECT → rewrite + web
             return "rewrite_node"
-        else:                                       # AMBIGUOUS → direct web search
-            return "web_search_node"
 
     def _build_graph(self):
         workflow = StateGraph(CRAGState)

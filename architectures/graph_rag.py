@@ -220,22 +220,10 @@ Query: {query}"""
         dense_docs = dense_response["documents"][0] if dense_response["documents"][0] else []
         dense_metas = dense_response["metadatas"][0] if dense_response["metadatas"] else [{}] * len(dense_docs)
 
-        # Self-evaluation
+        # Self-evaluation — informational only; always use ingested docs (no web fallback)
         quality = services.evaluate_context(query, dense_docs)
         _icons = {"CORRECT": "✅", "AMBIGUOUS": "⚠️", "INCORRECT": "❌"}
         step(f"Context quality: {_icons.get(quality, '')} {quality}")
-
-        if quality == "INCORRECT":
-            step("Insufficient context — web search fallback…")
-            web = services.web_search_fallback(query)
-            if web:
-                dense_docs = web
-                dense_metas = [{}] * len(dense_docs)
-        elif quality == "AMBIGUOUS":
-            web = services.web_search_fallback(query, n=2)
-            if web:
-                dense_docs = dense_docs + web
-                dense_metas = dense_metas + [{}] * len(web)
 
         # Feedback boost — surface positively-rated chunks, demote negatives
         dense_docs, dense_metas = adaptive_db.apply_feedback_boost(dense_docs, dense_metas, self.arch_key)

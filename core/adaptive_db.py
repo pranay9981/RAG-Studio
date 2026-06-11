@@ -67,7 +67,8 @@ class AdaptiveDB:
     # ── Semantic cache ────────────────────────────────────────────────────────
 
     def find_similar_query(
-        self, query_embedding: List[float], arch_key: str, threshold: float = 0.92
+        self, query_embedding: List[float], arch_key: str,
+        query_text: str = "", threshold: float = 0.95
     ) -> Optional[Dict]:
         try:
             import numpy as np
@@ -88,8 +89,17 @@ class AdaptiveDB:
         if q_norm == 0:
             return None
 
-        for query_text, emb_json, answer, sources_json in rows:
+        for cached_query_text, emb_json, answer, sources_json in rows:
             try:
+                # Length-ratio guard: queries of very different lengths are not equivalent
+                if query_text and cached_query_text:
+                    len_a = len(query_text.strip())
+                    len_b = len(cached_query_text.strip())
+                    if len_a > 0 and len_b > 0:
+                        ratio = min(len_a, len_b) / max(len_a, len_b)
+                        if ratio < 0.5:
+                            continue
+
                 c_vec = np.array(json.loads(emb_json), dtype=np.float32)
                 c_norm = float(np.linalg.norm(c_vec))
                 if c_norm == 0:
@@ -97,7 +107,7 @@ class AdaptiveDB:
                 sim = float(np.dot(q_vec, c_vec) / (q_norm * c_norm))
                 if sim >= threshold:
                     return {
-                        "query": query_text,
+                        "query": cached_query_text,
                         "answer": answer,
                         "sources": json.loads(sources_json),
                         "similarity": round(sim, 3),
