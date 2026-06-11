@@ -498,7 +498,7 @@ async def compare(request: CompareRequest):
         )
         threads.append(t)
         t.start()
-        time.sleep(0.05)  # 50ms stagger — reduces simultaneous HNSW reader initialization
+        time.sleep(0.15)  # 150ms stagger — reduces simultaneous HNSW reader initialization
 
     for t in threads:
         t.join(timeout=120)
@@ -538,10 +538,11 @@ Question: {request.query}
 Retrieved Context: {context[:1500] if has_context else "(not available)"}
 Generated Answer: {request.answer[:800]}
 
-Score each metric 0-10:
+Score EVERY metric below 0-10. You MUST include all keys in your JSON output.
 - relevance: Does the answer directly and completely address the question? (0=off-topic, 10=perfect)
 {context_metrics}
-Output ONLY valid JSON: {{"relevance": X{context_json}}}"""
+Output ONLY valid JSON with ALL keys present: {{"relevance": X{context_json}}}
+Do not omit any key. Use 0 if unsure."""
 
     try:
         resp = services.llm.invoke(prompt)
