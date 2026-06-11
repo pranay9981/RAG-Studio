@@ -66,6 +66,18 @@ class ApiKeyRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def fetch_url_text(url: str) -> str:
+    from urllib.parse import urlparse
+    import ipaddress
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Only http and https URLs are supported")
+    host = parsed.hostname or ""
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            raise HTTPException(status_code=400, detail="Internal network URLs are not allowed")
+    except ValueError:
+        pass  # hostname, not IP literal — allow DNS to resolve
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         html = resp.read().decode("utf-8", errors="replace")
@@ -79,6 +91,10 @@ async def process_file(file: UploadFile) -> List[Document]:
     content = await file.read()
     name = (file.filename or "").lower()
     source = file.filename or "upload"
+
+    MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds 50 MB limit")
 
     if name.endswith(".pdf"):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
@@ -144,6 +160,13 @@ async def process_file(file: UploadFile) -> List[Document]:
                 "rows": str(df.shape[0]),
             },
         )]
+
+    SUPPORTED_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+    if not name.endswith(SUPPORTED_IMAGE_EXTS):
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type. Supported: PDF, TXT, DOCX, CSV, XLSX, PNG, JPG, JPEG, GIF, WEBP"
+        )
 
     b64 = base64.b64encode(content).decode("utf-8")
     msg = HumanMessage(content=[
@@ -218,6 +241,14 @@ async def ingest_document(
     if not docs:
         raise HTTPException(status_code=422, detail="No content could be extracted")
 
+    # Reject re-upload of already-ingested source
+    existing_sources = {d["name"] for d in session.doc_library}
+    if source_name in existing_sources:
+        raise HTTPException(
+            status_code=409,
+            detail=f"'{source_name}' is already ingested. Delete it first to re-upload."
+        )
+
     # Parent-child chunking: small children for retrieval, parent text stored in metadata for generation
     docs = services.create_parent_child_documents(docs)
 
@@ -260,7 +291,7 @@ async def query_stream(
         cached = adaptive_db.find_similar_query(query_embedding, arch_key)
     except Exception:
         cached = None
-        query_embedding = None
+        query_embedding = []  # empty list, not None — prevents None-type errors downstream
 
     if cached:
         async def cached_generator():
@@ -351,7 +382,40 @@ async def query_stream(
                     break
 
             except Empty:
-                if not thread.is_alive() and q.empty():
+                if not thread.is_alive():
+                    # Drain residual events — thread is done, no more items will be added
+                    while True:
+                        try:
+                            event = q.get_nowait()
+                        except Empty:
+                            break
+                        kind, content = event
+                        if kind == "sources":
+                            collected_sources.extend(content)
+                            payload = json.dumps({"type": "sources", "content": content})
+                        elif kind == "token":
+                            payload = json.dumps({"type": "token", "content": content})
+                        elif kind == "step":
+                            payload = json.dumps({"type": "step", "content": content})
+                        elif kind == "done":
+                            collected_answer = content.get("answer", "")
+                            elapsed = content.get("elapsed", 0)
+                            payload = json.dumps({"type": "done", "answer": collected_answer, "elapsed": elapsed, "cached": False})
+                        elif kind == "error":
+                            payload = json.dumps({"type": "error", "content": content.get("message", "Unknown error")})
+                        else:
+                            payload = json.dumps({"type": kind, "content": str(content)})
+                        yield f"data: {payload}\n\n"
+                        if kind in ("done", "error"):
+                            if kind == "done":
+                                session.history.append({"query": query, "arch": arch_key, "elapsed": elapsed, "answer": collected_answer[:120]})
+                                adaptive_db.store_query_analytics(arch_key, query, elapsed)
+                                if collected_answer and query_embedding:
+                                    try:
+                                        adaptive_db.store_query_cache(arch_key, query, query_embedding, collected_answer, collected_sources[:5])
+                                    except Exception as e:
+                                        print(f"[cache] store_query_cache failed: {e}")
+                            return
                     break
                 await asyncio.sleep(0.01)
 
@@ -582,27 +646,6 @@ async def set_api_key(request: ApiKeyRequest):
         raise HTTPException(status_code=400, detail="API key cannot be empty")
     key = request.api_key.strip()
     os.environ["GROQ_API_KEY"] = key
-
-    # Persist to .env so the key survives server restarts
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
-    try:
-        lines: list = []
-        if os.path.exists(env_path):
-            with open(env_path, "r") as f:
-                lines = f.readlines()
-        key_line = f"GROQ_API_KEY={key}\n"
-        replaced = False
-        for i, line in enumerate(lines):
-            if line.startswith("GROQ_API_KEY="):
-                lines[i] = key_line
-                replaced = True
-                break
-        if not replaced:
-            lines.append(key_line)
-        with open(env_path, "w") as f:
-            f.writelines(lines)
-    except Exception as e:
-        print(f"[config] Could not persist API key to .env: {e}")
 
     try:
         from langchain_groq import ChatGroq

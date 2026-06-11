@@ -83,21 +83,23 @@ class MultilingualRAGPipeline:
                 reranked_texts = reranked_texts + web
                 metas = metas + [{}] * len(web)
 
+        # Build unified lookup BEFORE boost (covers both ChromaDB + web results)
+        combined_meta_map = {text: meta for text, meta in zip(reranked_texts, metas)}
+
         # Feedback boost — surface positively-rated chunks, demote negatives
         dummy_metas = [{} for _ in reranked_texts]
         reranked_texts, _ = adaptive_db.apply_feedback_boost(reranked_texts, dummy_metas, self.arch_key)
 
-        src_map = {doc: (meta or {}).get("source", "Unknown") for doc, meta in zip(docs, metas)}
+        # Rebuild metas following boosted order using the unified map
+        reranked_metas = [combined_meta_map.get(t, {}) for t in reranked_texts]
+
         if on_step:
             sources = [
-                {"text": text[:300], "source": src_map.get(text, "Unknown"), "score": round(score, 3)}
-                for score, text in scored
+                {"text": text[:300], "source": (combined_meta_map.get(text, {}) or {}).get("source", "Unknown")}
+                for text in reranked_texts[:4]
             ]
             on_step(("sources", sources))
 
-        # Build context using window_text where available
-        meta_map = {doc: meta for doc, meta in zip(docs, metas)}
-        reranked_metas = [meta_map.get(t, {}) for t in reranked_texts]
         context = services.build_sourced_context(reranked_texts, reranked_metas)
 
         prompt = f"""You are a helpful Multilingual Assistant.

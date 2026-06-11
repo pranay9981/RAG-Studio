@@ -14,11 +14,7 @@ load_dotenv()
 
 class SharedServices:
     def __init__(self):
-        self.llm = ChatGroq(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            temperature=0.2,
-            max_tokens=1024,
-        )
+        self._llm = None
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         self._multilingual_embeddings = None  # lazy-loaded on first use (BAAI/bge-m3)
         self.chroma_client = self._init_chroma_client()
@@ -28,6 +24,29 @@ class SharedServices:
         self.child_text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=300, chunk_overlap=50
         )
+        # Try to init LLM eagerly if key already present
+        if os.environ.get("GROQ_API_KEY", "").strip():
+            self._init_llm()
+
+    def _init_llm(self):
+        self._llm = ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature=0.2,
+            max_tokens=1024,
+        )
+
+    @property
+    def llm(self):
+        if self._llm is None:
+            key = os.environ.get("GROQ_API_KEY", "").strip()
+            if not key:
+                raise RuntimeError("GROQ_API_KEY is not set. Configure it via the API key settings in the UI.")
+            self._init_llm()
+        return self._llm
+
+    @llm.setter
+    def llm(self, value):
+        self._llm = value
 
     def _init_chroma_client(self):
         """PersistentClient with safe migration — wipes directory on HNSW corruption and retries."""

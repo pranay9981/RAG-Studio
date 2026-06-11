@@ -3,10 +3,12 @@ from typing import List
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from core.shared_services import services
+from core.adaptive_db import adaptive_db
 
 
 class MultimodalRAGPipeline:
     def __init__(self):
+        self.arch_key = "05 Multimodal RAG (Vision + Text)"
         self.collection_name = "multimodal_rag_collection"
         try:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
@@ -57,8 +59,13 @@ class MultimodalRAGPipeline:
             include=["documents", "metadatas"],
         )
 
-        docs = results["documents"][0]
-        metadatas = results["metadatas"][0]
+        docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
+        metadatas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
+        if not docs:
+            return "No documents retrieved. Please ingest a document first."
+
+        # Feedback boost
+        docs, metadatas = adaptive_db.apply_feedback_boost(docs, metadatas, self.arch_key)
 
         if on_step and docs:
             sources = [

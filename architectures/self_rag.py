@@ -235,6 +235,11 @@ Answer:"""
                 current_query = self._refine_query(query, missing)
             else:
                 step("Scores below threshold — broadening retrieval…")
-                top_k = min(top_k + 3, self.collection.count())
+                top_k = top_k + 3  # _retrieve() already caps to collection.count()
 
-        return draft_answer
+        if draft_answer:
+            step("Streaming best available answer…")
+            return services.stream_llm(
+                gen_prompt, on_token=lambda t: on_step and on_step(("token", t))
+            )
+        return "Unable to generate a satisfactory answer for this query."

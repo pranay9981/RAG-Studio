@@ -1,5 +1,6 @@
 from typing import List, Dict, TypedDict
 import uuid
+import threading
 from langchain_core.documents import Document
 from langgraph.graph import StateGraph, END
 from core.shared_services import services
@@ -14,7 +15,7 @@ class CRAGState(TypedDict):
 
 class CorrectiveRAGPipeline:
     def __init__(self):
-        self._on_step = None
+        self._local = threading.local()
         self.collection_name = "crag_collection"
         try:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
@@ -25,8 +26,11 @@ class CorrectiveRAGPipeline:
             except Exception:
                 pass
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-        self._doc_sources: List[str] = []
         self.graph = self._build_graph()
+
+    @property
+    def _on_step(self):
+        return getattr(self._local, 'on_step', None)
 
     def reset(self):
         try:
@@ -34,7 +38,6 @@ class CorrectiveRAGPipeline:
         except Exception:
             pass
         self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-        self._doc_sources = []
 
     def ingest(self, documents: List[Document]):
         if not documents:
@@ -45,7 +48,6 @@ class CorrectiveRAGPipeline:
         metadatas = [doc.metadata for doc in documents]
         embeddings = services.embeddings.embed_documents(texts)
         self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
-        self._doc_sources.extend([doc.metadata.get("source", "Unknown") for doc in documents])
 
     def retrieve_node(self, state: CRAGState) -> Dict:
         query = state["query"]
@@ -123,9 +125,9 @@ Answer:"""
     def route_evaluation(self, state: CRAGState) -> str:
         if state["evaluation"] == "CORRECT":
             return "generate_node"
-        elif state["evaluation"] == "AMBIGUOUS":
+        elif state["evaluation"] == "INCORRECT":   # worst case → full rewrite + web
             return "rewrite_node"
-        else:
+        else:                                       # AMBIGUOUS → direct web search
             return "web_search_node"
 
     def _build_graph(self):
@@ -152,7 +154,7 @@ Answer:"""
         return workflow.compile()
 
     def query(self, query: str, on_step=None) -> str:
-        self._on_step = on_step
+        self._local.on_step = on_step
         initial_state = {
             "query": query,
             "documents": [],
@@ -193,4 +195,4 @@ Answer:"""
         except Exception as e:
             return f"CRAG pipeline failed: {str(e)}"
         finally:
-            self._on_step = None
+            self._local.on_step = None

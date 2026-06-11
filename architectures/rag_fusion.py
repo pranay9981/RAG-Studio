@@ -78,7 +78,7 @@ Original query: {query}
         if not self.collection.count():
             return "Please ingest a document first!"
 
-        step("Generating query variations with Gemini…")
+        step("Generating query variations with Llama 4 Scout…")
         sub_queries = self._generate_sub_queries(query, n=4)
 
         all_ranked_lists = []

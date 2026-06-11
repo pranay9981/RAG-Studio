@@ -92,12 +92,32 @@ export default function MarkdownContent({ content, className }: { content: strin
       continue
     }
 
+    // fenced code block
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim()
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      i++ // skip closing ```
+      nodes.push(
+        <pre key={nextKey()} className="bg-white/[0.05] rounded-lg p-3 overflow-x-auto my-2">
+          <code className={`text-xs font-mono text-indigo-200${lang ? ` language-${lang}` : ''}`}>
+            {codeLines.join('\n')}
+          </code>
+        </pre>
+      )
+      continue
+    }
+
     // paragraph — collect until blank or block-level line
     const para: string[] = []
     while (
       i < lines.length &&
       lines[i].trim() &&
-      !/^(#{1,3} |[*-] |\d+\. |> |-{3,}$)/.test(lines[i])
+      !/^(#{1,3} |[*-] |\d+\. |> |-{3,}$|```)/.test(lines[i])
     ) {
       para.push(lines[i].trimEnd())
       i++

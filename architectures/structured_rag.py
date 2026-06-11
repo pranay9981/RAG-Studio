@@ -110,9 +110,12 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
                 "import", "exec", "eval", "__", "open(", "os.", "sys.",
                 "subprocess", "shutil", "globals", "locals", "getattr",
                 "setattr", "delattr", "compile", "input", "print(",
+                "breakpoint", "vars(", "dir(",
             )
             if any(p in code for p in _FORBIDDEN):
                 raise ValueError("Unsafe pattern detected in generated pandas expression")
+            if "__" in code:
+                raise ValueError("Dunder access forbidden in pandas expression")
             result = eval(code, {"__builtins__": None}, {"df": df, "pd": pd})
             return f"**Pandas result:** `{code}`\n\nResult:\n```\n{str(result)[:1200]}\n```"
         except Exception as e:
@@ -130,12 +133,15 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
         structured_result = None
         if self._table_store:
             step("Attempting structured query (Text-to-Pandas)…")
+            all_results = []
             for source, table in self._table_store.items():
                 result = self._run_pandas_query(table["csv_text"], table["columns"], query)
                 if result:
-                    structured_result = result
-                    step("✅ Pandas query succeeded")
-                    break
+                    label = source.split("/")[-1].split("\\")[-1]
+                    all_results.append(f"**{label}:**\n{result}")
+            if all_results:
+                structured_result = "\n\n".join(all_results)
+                step("✅ Pandas query succeeded across all tables")
             if not structured_result:
                 step("⚠️ Pandas query failed — falling back to vector search…")
 

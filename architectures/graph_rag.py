@@ -53,6 +53,8 @@ class GraphRAGPipeline:
             with open(self._graph_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self.graph.clear()
+            for node in data.get("nodes", []):
+                self.graph.add_node(node)
             for edge in data.get("edges", []):
                 self.graph.add_edge(
                     edge["source"], edge["target"],

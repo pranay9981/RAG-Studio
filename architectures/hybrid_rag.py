@@ -1,4 +1,5 @@
 import uuid
+import threading
 from typing import List, Dict
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
@@ -10,6 +11,7 @@ class HybridRAGPipeline:
     def __init__(self):
         self.arch_key = "01 Hybrid RAG (Dense + Sparse)"
         self.collection_name = "hybrid_rag_collection"
+        self._ingest_lock = threading.Lock()
         self.bm25 = None
         self.chunks: List[Document] = []
         self.chunk_ids: List[str] = []
@@ -55,25 +57,26 @@ class HybridRAGPipeline:
         if not documents:
             return
 
-        start = len(self.chunk_ids)
-        new_ids = [f"hybrid_{uuid.uuid4().hex[:8]}_{start + i}" for i in range(len(documents))]
+        with self._ingest_lock:
+            start = len(self.chunk_ids)
+            new_ids = [f"hybrid_{uuid.uuid4().hex[:8]}_{start + i}" for i in range(len(documents))]
 
-        self.chunks.extend(documents)
-        self.chunk_ids.extend(new_ids)
+            self.chunks.extend(documents)
+            self.chunk_ids.extend(new_ids)
 
-        texts = [doc.page_content for doc in documents]
-        metadatas = [doc.metadata for doc in documents]
-        embeddings = services.embeddings.embed_documents(texts)
+            texts = [doc.page_content for doc in documents]
+            metadatas = [doc.metadata for doc in documents]
+            embeddings = services.embeddings.embed_documents(texts)
 
-        self.collection.add(
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=new_ids,
-        )
+            self.collection.add(
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                ids=new_ids,
+            )
 
-        tokenized_corpus = [doc.page_content.lower().split() for doc in self.chunks]
-        self.bm25 = BM25Okapi(tokenized_corpus)
+            tokenized_corpus = [doc.page_content.lower().split() for doc in self.chunks]
+            self.bm25 = BM25Okapi(tokenized_corpus)
 
     def _reciprocal_rank_fusion(
         self, dense_results: List[Dict], sparse_results: List[Dict], k: int = 60

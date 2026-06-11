@@ -14,7 +14,7 @@ import ArchExplainer from '@/components/ArchExplainer'
 import {
   getArchitectures, streamQuery, compareAll, evaluateAnswer,
   resetSession, getGraphHtml, submitFeedback, getAnalytics, getConfigStatus,
-  listDocuments,
+  listDocuments, getHistory,
 } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
@@ -68,6 +68,7 @@ export default function Page() {
       }
     })
     getConfigStatus().then(({ has_key }) => { if (!has_key) setShowApiKey(true) }).catch(() => {})
+    getHistory().then(h => { if (h.length) setHistory(h) })
   }, [])
 
   // Session persistence — restore messages from localStorage
@@ -177,19 +178,21 @@ export default function Page() {
 
     let collectedSources: Source[] = []
 
+    let localTokens = ''
     cleanupRef.current = streamQuery(q, selectedArch, SESSION_ID, {
       onStep: s => setSteps(prev => [...prev, s]),
-      onToken: t => setTokens(prev => prev + t),
+      onToken: t => { localTokens += t; setTokens(prev => prev + t) },
       onSources: s => { collectedSources = s; setLiveSource(s) },
       onDone: async (answer, elapsed, cached) => {
+        const finalContent = answer || localTokens
         let evalScore: EvalScore | undefined
-        if (enableEval && answer) {
-          try { evalScore = await evaluateAnswer(q, answer, collectedSources, selectedArch) } catch {}
+        if (enableEval && finalContent) {
+          try { evalScore = await evaluateAnswer(q, finalContent, collectedSources, selectedArch) } catch {}
         }
         appendMsg(selectedArch, {
           id: uuidv4(),
           role: 'assistant',
-          content: answer || tokens,
+          content: finalContent,
           arch: selectedArch,
           elapsed,
           sources: collectedSources,
@@ -210,7 +213,7 @@ export default function Page() {
         setTokens('')
       },
     })
-  }, [input, isStreaming, compareMode, selectedArch, enableEval, tokens, appendMsg])
+  }, [input, isStreaming, compareMode, selectedArch, enableEval, appendMsg])
 
   const handleClearChat = () => {
     setAllMessages(prev => ({ ...prev, [chatKey]: [] }))

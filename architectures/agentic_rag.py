@@ -1,6 +1,7 @@
 from typing import List, Dict, Annotated, TypedDict
 import operator
 import uuid
+import threading
 from langchain_core.documents import Document
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langgraph.graph import StateGraph, END
@@ -15,7 +16,7 @@ class AgentState(TypedDict):
 
 class AgenticRAGPipeline:
     def __init__(self):
-        self._on_step = None
+        self._local = threading.local()
         self.collection_name = "agentic_rag_collection"
         try:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
@@ -27,6 +28,10 @@ class AgenticRAGPipeline:
                 pass
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         self.graph = self._build_graph()
+
+    @property
+    def _on_step(self):
+        return getattr(self._local, 'on_step', None)
 
     def reset(self):
         try:
@@ -201,7 +206,7 @@ Answer directly and comprehensively:"""
         return workflow.compile()
 
     def query(self, query: str, on_step=None) -> str:
-        self._on_step = on_step
+        self._local.on_step = on_step
         initial_state = {
             "messages": [HumanMessage(content=query)],
             "plan": "",
@@ -247,4 +252,4 @@ Answer directly and comprehensively:"""
         except Exception as e:
             return f"Agent pipeline failed: {str(e)}"
         finally:
-            self._on_step = None
+            self._local.on_step = None

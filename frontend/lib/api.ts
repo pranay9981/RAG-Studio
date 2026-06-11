@@ -1,4 +1,4 @@
-import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, AnalyticsData } from './types'
+import type { ArchInfo, Source, EvalScore, CompareResult, DocItem, AnalyticsData, HistoryItem } from './types'
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://127.0.0.1:8000'
 
@@ -160,6 +160,22 @@ export async function getConfigStatus(): Promise<{ has_key: boolean }> {
     return r.json()
   } catch {
     return { has_key: false }
+  }
+}
+
+export async function getHistory(): Promise<HistoryItem[]> {
+  try {
+    const r = await fetch(`${BASE}/api/history`)
+    if (!r.ok) return []
+    const data = await r.json()
+    return (data.history ?? []).map((h: { query: string; arch: string; elapsed: number; answer: string }) => ({
+      query: h.query,
+      arch: h.arch,
+      elapsed: h.elapsed,
+      answer: h.answer,
+    }))
+  } catch {
+    return []
   }
 }
 

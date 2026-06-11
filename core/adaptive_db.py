@@ -18,6 +18,9 @@ class AdaptiveDB:
 
     def _init_tables(self):
         with self._lock:
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA synchronous=NORMAL")
+            self.conn.commit()
             self.conn.executescript("""
             CREATE TABLE IF NOT EXISTS feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
