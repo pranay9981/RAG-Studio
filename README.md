@@ -36,22 +36,28 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 - **URL ingestion** — paste a webpage URL; it's scraped, chunked, and ingested automatically
 - **Document management** — view all ingested files with chunk counts; delete individual files from all architectures
 - **API key management** — set your Groq API key from the UI without restarting the server; auto-prompts on first launch
-- **Chat export** — download the conversation as a Markdown file
+- **Chat export** — download current chat, all architecture chats, or compare results as Markdown files (3 export options)
 - **LocalStorage persistence** — chat history survives page refreshes
 - **Persistent ChromaDB** — vector store survives server restarts; documents don't need to be re-ingested
 
 ### Adaptive RAG
-- **Semantic query cache** — queries with cosine similarity ≥ 0.92 to a cached query return instantly (⚡ badge)
+- **Semantic query cache** — queries with cosine similarity ≥ 0.95 (+ length-ratio guard) return instantly (⚡ badge)
+- **Clear cache** — one-click cache clear from the sidebar action buttons
 - **Context quality self-evaluation** — after retrieval, each pipeline evaluates its own context: CORRECT → generate, AMBIGUOUS → supplement with web search, INCORRECT → web search fallback
 - **Parent-child chunking** — small child chunks (300 chars) embedded for precise retrieval; full parent chunk (1000 chars) used for richer generation context
-- **Feedback-driven retrieval** — thumbs up/down on any answer; positively-rated chunks surface first in future queries
+- **Feedback-driven retrieval** — thumbs up/down on any answer; re-click to unmark; positively-rated chunks surface first in future queries; negatively-rated chunks are demoted
 - **Multi-hop decomposition** — Agentic RAG splits complex multi-part queries into sub-questions, retrieves each independently, then merges context
 
 ### Evaluation
-- **RAGAS-inspired two-step faithfulness** — extracts individual claims from the answer, verifies each claim against retrieved context; score = verified/total × 10
-- **4-metric scorecard** — Faithfulness, Answer Relevance, Context Precision, Context Recall (all 0–10)
+- **RAGAS-inspired 4-metric scorecard** — Faithfulness, Answer Relevance, Context Precision, Context Recall (all 0–10)
 - **Analytics dashboard** — per-architecture query count, average latency, eval scores (bar chart), cache hit rate, feedback ratio
 - **Architecture explainer** — pipeline flow diagram, how-it-works text, best-use cases, and adaptive features per architecture
+
+### UI
+- **OLED dark theme** — deep black (`#07070f`) base with violet (`#7c3aed`) accent throughout
+- **Glass surface cards** — layered surface tokens, glow shadows, slide-up animations
+- **Real-time streaming** — bouncing dot animation while the LLM generates; emerald checkmark on completion
+- **Horizontal eval score bars** — color-coded fills (green ≥ 7, amber ≥ 4, red < 4) with average badge
 
 ---
 
@@ -82,20 +88,20 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 ```
 multiple-rag-system/
 │
-├── app.py                          # Streamlit UI (legacy — still works)
 ├── requirements.txt
 ├── Dockerfile                      # FastAPI backend Docker image
 ├── docker-compose.yml              # backend + frontend + chroma_data volume
 ├── .env                            # GROQ_API_KEY (gitignored)
 ├── .env.example                    # Template — copy to .env and fill in
-├── adaptive.db                     # SQLite — feedback, semantic cache, analytics (auto-created)
+├── adaptive.db                     # SQLite — feedback, semantic cache, analytics (auto-created, gitignored)
 ├── chroma_db/                      # Persistent ChromaDB vector store (auto-created, gitignored)
 │
 ├── core/
 │   ├── shared_services.py          # LLM (ChatGroq), embeddings, PersistentChromaDB, reranker,
 │   │                               # parent-child chunking, build_sourced_context,
-│   │                               # evaluate_context, web_search_fallback
-│   └── adaptive_db.py              # AdaptiveDB — feedback boost, semantic cache, analytics
+│   │                               # evaluate_context, web_search_fallback,
+│   │                               # chroma_query() — HNSW-safe retry wrapper used by all archs
+│   └── adaptive_db.py              # AdaptiveDB — feedback boost/unmark, semantic cache, analytics
 │
 ├── architectures/
 │   ├── hybrid_rag.py               # Dense + BM25 + RRF + cross-encoder + feedback boost
@@ -112,27 +118,31 @@ multiple-rag-system/
 ├── backend/
 │   ├── __init__.py
 │   ├── session_manager.py          # GlobalSession — initialises all 10 pipelines + ARCH_INFO
-│   └── api.py                      # FastAPI v4 — 17 endpoints, SSE streaming, RAGAS eval
+│   └── api.py                      # FastAPI — 18 endpoints, SSE streaming, RAGAS eval
+│
+├── legacy/
+│   └── app.py                      # Original Streamlit prototype (reference only)
 │
 └── frontend/
     ├── Dockerfile                  # Next.js multi-stage Docker image
     ├── app/
     │   ├── layout.tsx
-    │   ├── page.tsx                # Root — all state, streaming, feedback, analytics
-    │   └── globals.css
+    │   ├── page.tsx                # Root — all state, streaming, feedback, analytics, exports
+    │   └── globals.css             # CSS variables, glass utilities, animations
     ├── components/
-    │   ├── Sidebar.tsx             # Arch list, action buttons, doc library
-    │   ├── ArchCard.tsx            # Architecture info card with message count badge
-    │   ├── ChatMessage.tsx         # Chat bubbles with thumbs feedback + ⚡ cached badge
+    │   ├── Sidebar.tsx             # Arch list, toggles, action grid (clear/reset/export/cache/stats/api key)
+    │   ├── ArchCard.tsx            # Architecture info card with expandable how-it-works
+    │   ├── ChatMessage.tsx         # Chat bubbles with thumbs feedback (toggle to unmark) + ⚡ cached badge
     │   ├── MarkdownContent.tsx     # Inline markdown renderer
-    │   ├── BrainWorking.tsx        # Live step indicators + streaming tokens + cursor
-    │   ├── SourcePanel.tsx         # Collapsible source citations with scores
-    │   ├── EvalScorecard.tsx       # 4-metric scorecard: Faithfulness / Relevance / Precision / Recall
-    │   ├── DocumentManager.tsx     # Multi-file upload + URL ingestion + per-file delete
+    │   ├── BrainWorking.tsx        # Live step indicators + bouncing dots + emerald done state
+    │   ├── SourcePanel.tsx         # Collapsible source citations with chunk counts and scores
+    │   ├── EvalScorecard.tsx       # Horizontal score bars: Faithfulness / Relevance / Precision / Recall
+    │   ├── DocumentManager.tsx     # Drag-drop upload + URL ingestion + per-file delete
     │   ├── ApiKeyModal.tsx         # Groq API key modal — auto-opens if no key set
-    │   ├── CompareGrid.tsx         # 10-card grid with expand modal
+    │   ├── CompareGrid.tsx         # 10-card grid with ping-ring loading + expand modal
     │   ├── AnalyticsDashboard.tsx  # Per-arch stats table with bar charts + recent queries
     │   └── ArchExplainer.tsx       # Pipeline flow, how-it-works, adaptive features per arch
+    ├── tailwind.config.ts          # Custom tokens: surface colors, glow shadows, slide-up animation
     └── lib/
         ├── api.ts                  # All API calls + EventSource streamQuery()
         └── types.ts                # TypeScript interfaces
@@ -208,22 +218,22 @@ docker compose up --build
 
 Both services start automatically. ChromaDB data persists in a named Docker volume.
 
-> **Note:** Do NOT run FastAPI and the legacy Streamlit app simultaneously — they share the same ChromaDB collections.
-
 ---
 
 ## How to Use
 
 1. **Upload documents** — drag-drop one or more files (PDF, DOCX, TXT, CSV, XLSX, PNG, JPG) or paste a URL. All formats are ingested into all 10 architectures automatically.
 2. **Ask questions** — press Enter to send; watch the brain-working panel stream live pipeline steps and tokens in real time.
-3. **Compare mode** — toggle "Compare (10)" to run every architecture simultaneously; results appear in a card grid.
-4. **Multi-document queries** — upload multiple files then ask comparison questions like "What are the differences between document A and document B?" — each chunk is labelled with its source.
-5. **RAG Evaluation** — toggle "RAG Evaluation" to get RAGAS-inspired scores after each answer (Faithfulness via claim verification, Relevance, Context Precision, Context Recall).
-6. **Thumbs feedback** — rate any answer up or down; the system surfaces positively-rated chunks first in future queries.
-7. **Stats** — click "Stats" in the sidebar to see per-architecture analytics: query counts, latencies, eval scores, cache hits, and feedback ratios.
-8. **How it works** — click "How it works" in the header for a detailed explainer of the current architecture's pipeline.
-9. **Document management** — view and delete ingested files per architecture from the sidebar.
-10. **API Key** — click the "API Key" button in the sidebar to update your Groq key at any time without restarting the server.
+3. **Compare mode** — toggle "Compare All (10)" to run every architecture simultaneously; results appear in a card grid with per-card expand modal.
+4. **Multi-document queries** — upload multiple files then ask comparison questions like "What are the differences between document A and document B?" — each chunk is labelled with its source filename.
+5. **RAG Evaluation** — toggle "RAG Evaluation" to get RAGAS-inspired scores after each answer (Faithfulness, Relevance, Context Precision, Context Recall).
+6. **Thumbs feedback** — rate any answer up or down; click the active button again to unmark. The system surfaces positively-rated chunks first in future queries.
+7. **Export** — click "Export" in the sidebar action grid to download the current chat, all architecture chats, or compare results as `.md` files.
+8. **Clear Cache** — click "Cache" in the sidebar to wipe the semantic query cache; forces all architectures to re-run their full retrieval pipelines.
+9. **Stats** — click "Stats" in the sidebar to see per-architecture analytics: query counts, latencies, eval scores, cache hits, and feedback ratios.
+10. **How it works** — click "How it works" in the header for a detailed explainer of the current architecture's pipeline.
+11. **Document management** — view and delete ingested files from the sidebar Documents panel.
+12. **API Key** — click the "API Key" button in the sidebar to update your Groq key at any time without restarting the server.
 
 ---
 
@@ -236,15 +246,16 @@ Both services start automatically. ChromaDB data persists in a named Docker volu
 | `GET` | `/api/sessions/{id}` | Session info, ingested archs, doc library |
 | `POST` | `/api/ingest` | File or URL ingest with parent-child chunking |
 | `GET` | `/api/query` | SSE stream — `step` / `token` / `sources` / `done` / `error` events |
-| `POST` | `/api/compare` | Run all 10 architectures concurrently |
-| `POST` | `/api/evaluate` | RAGAS-inspired 4-metric scoring (2-step faithfulness + 3 other metrics) |
-| `POST` | `/api/feedback` | Store thumbs up/down rating |
+| `POST` | `/api/compare` | Run all 10 architectures concurrently (150ms stagger, HNSW-safe) |
+| `POST` | `/api/evaluate` | RAGAS-inspired 4-metric scoring |
+| `POST` | `/api/feedback` | Store rating (1 = up, -1 = down, 0 = unmark/delete) |
 | `GET` | `/api/analytics` | Per-architecture aggregated stats from SQLite |
 | `GET` | `/api/graph` | PyVis HTML for Graph RAG knowledge graph visualisation |
 | `GET` | `/api/history` | Last 20 queries |
 | `DELETE` | `/api/sessions/{id}` | Reset all pipelines and session history |
 | `GET` | `/api/documents` | List ingested files + chunk counts for an architecture |
 | `DELETE` | `/api/documents` | Delete a file from all architectures |
+| `DELETE` | `/api/cache` | Clear the semantic query cache |
 | `GET` | `/api/config/status` | Returns `{has_key: bool}` — whether GROQ_API_KEY is set |
 | `POST` | `/api/config/apikey` | Set Groq API key at runtime and re-initialise LLM |
 
@@ -255,7 +266,7 @@ Both services start automatically. ChromaDB data persists in a named Docker volu
 ```
 Query
   │
-  ├─► Semantic Cache (cosine sim ≥ 0.92) ──► ⚡ Instant cached answer
+  ├─► Semantic Cache (cosine sim ≥ 0.95 + length-ratio guard) ──► ⚡ Instant cached answer
   │
   ▼
 Retrieve chunks
@@ -265,12 +276,16 @@ Retrieve chunks
   ▼
 Self-Evaluation (evaluate_context)
   ├─► CORRECT  ──────────────────► Generate answer
-  ├─► AMBIGUOUS ─► + web search ──► Generate answer
-  └─► INCORRECT ─► web search ────► Generate answer
+  ├─► AMBIGUOUS ─► + web search ──► Generate answer  (CRAG: always generate, no web)
+  └─► INCORRECT ─► web search ────► Generate answer  (Graph RAG: always use ingested docs)
   │
   ▼
 Store in semantic cache + analytics
 ```
+
+### HNSW Concurrency Protection
+
+All 10 architectures use `services.chroma_query()` — a thread-safe wrapper around ChromaDB's `collection.query()` that retries up to 3× on HNSW segment reader failures (common under concurrent compare-mode load), refreshing the collection handle between attempts. Never call `collection.query()` directly in new architectures.
 
 ---
 
