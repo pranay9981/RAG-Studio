@@ -11,6 +11,14 @@ class MultilingualRAGPipeline:
         self.collection_name = "multilingual_rag_collection"
         try:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+            # Detect stale collection created with MiniLM (384-dim) instead of BGE-M3 (1024-dim)
+            if self.collection.count() > 0:
+                sample = self.collection.get(include=["embeddings"], limit=1)
+                embs = sample.get("embeddings") or []
+                if embs and len(embs[0]) != 1024:
+                    print(f"[multilingual_rag] Dimension mismatch ({len(embs[0])} vs 1024) — recreating collection")
+                    services.chroma_client.delete_collection(self.collection_name)
+                    self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         except Exception as e:
             print(f"[{self.collection_name}] init failed ({e}) — recreating")
             try:
@@ -38,7 +46,17 @@ class MultilingualRAGPipeline:
             for doc in documents
         ]
         embeddings = services.multilingual_embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        try:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        except Exception as e:
+            if "dimension" in str(e).lower():
+                # Stale collection with wrong embedding dim — recreate and retry
+                print(f"[multilingual_rag] Dimension mismatch on add — recreating collection and retrying")
+                services.chroma_client.delete_collection(self.collection_name)
+                self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+                self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+            else:
+                raise
 
     def query(self, query: str, on_step=None) -> str:
         def step(msg):
