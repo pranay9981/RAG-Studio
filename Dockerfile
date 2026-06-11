@@ -2,10 +2,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System libs needed for torch, numpy, chromadb
+# System libs needed for torch, numpy, chromadb, and healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

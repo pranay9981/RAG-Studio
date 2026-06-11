@@ -22,16 +22,26 @@ export default function DocumentManager({ archKeys, onIngested, docLibrary, onDo
     if (!files.length) return
     setLoading(true); setMsg('')
     let totalChunks = 0; let errors = 0
+    const errorMessages: string[] = []
     for (const file of files) {
       try {
         const res = await ingestFile(file, archKeys)
         totalChunks += res.chunks
         onIngested(res.source, res.chunks)
-      } catch { errors++ }
+      } catch (e: unknown) {
+        errors++
+        const msg = e instanceof Error ? e.message : 'unknown error'
+        errorMessages.push(`${file.name}: ${msg}`)
+      }
     }
-    setMsg(errors === 0
-      ? `✓ ${files.length} file${files.length > 1 ? 's' : ''} → ${totalChunks} chunks ingested`
-      : `✓ ${files.length - errors} ingested, ${errors} failed`)
+    if (errors > 0) {
+      const detail = errorMessages.length <= 2
+        ? errorMessages.join('; ')
+        : `${errorMessages.slice(0, 2).join('; ')} (+${errorMessages.length - 2} more)`
+      setMsg(`✓ ${files.length - errors} ingested · ✗ ${errors} failed — ${detail}`)
+    } else {
+      setMsg(`✓ ${files.length} file${files.length > 1 ? 's' : ''} → ${totalChunks} chunks ingested`)
+    }
     setLoading(false)
   }
 

@@ -1,3 +1,4 @@
+import threading
 from typing import Dict, Any, List, Set
 
 from architectures.hybrid_rag import HybridRAGPipeline
@@ -123,6 +124,7 @@ ARCH_INFO: Dict[str, Dict] = {
 
 class GlobalSession:
     def __init__(self):
+        self._lock = threading.Lock()
         self.pipelines: Dict[str, Any] = {
             "hybrid_pipeline":       HybridRAGPipeline(),
             "graph_pipeline":        GraphRAGPipeline(),
@@ -141,6 +143,24 @@ class GlobalSession:
 
     def get_pipeline(self, state_key: str) -> Any:
         return self.pipelines.get(state_key)
+
+    def append_history(self, entry: dict):
+        with self._lock:
+            self.history.append(entry)
+            if len(self.history) > 200:
+                self.history = self.history[-200:]
+
+    def add_ingested_arch(self, arch_key: str):
+        with self._lock:
+            self.ingested_archs.add(arch_key)
+
+    def append_doc(self, doc: dict):
+        with self._lock:
+            self.doc_library.append(doc)
+
+    def filter_doc_library(self, predicate):
+        with self._lock:
+            self.doc_library = [d for d in self.doc_library if predicate(d)]
 
     def reset(self):
         for pipeline in self.pipelines.values():

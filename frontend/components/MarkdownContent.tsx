@@ -101,7 +101,9 @@ export default function MarkdownContent({ content, className }: { content: strin
         codeLines.push(lines[i])
         i++
       }
-      i++ // skip closing ```
+      if (i < lines.length) {
+        i++ // skip closing ``` only if it exists (prevents drop on unterminated block)
+      }
       nodes.push(
         <pre key={nextKey()} className="bg-white/[0.05] rounded-lg p-3 overflow-x-auto my-2">
           <code className={`text-xs font-mono text-indigo-200${lang ? ` language-${lang}` : ''}`}>

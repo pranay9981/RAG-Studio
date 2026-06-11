@@ -44,14 +44,13 @@ class SelfRAGPipeline:
     def ingest(self, documents: List[Document]):
         if not documents:
             return
-        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
         metadatas = [
             {k: v for k, v in doc.metadata.items()
              if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
             for doc in documents
         ]
-        ids = [f"selfrag_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        ids = [f"selfrag_{uuid.uuid4().hex}" for _ in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
         self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
@@ -62,8 +61,8 @@ class SelfRAGPipeline:
             n_results=n,
             include=["documents", "metadatas"],
         )
-        docs = results["documents"][0]
-        metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
+        docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
+        metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
         return docs, metas
 
     def _grade_relevance(self, query: str, docs: List[str]) -> List[bool]:
@@ -149,6 +148,7 @@ Output ONLY the refined query (1–2 sentences):"""
         all_docs: List[str] = []
         all_metas: List[dict] = []
         current_query = query
+        gen_prompt = ""
         draft_answer = ""
 
         for loop in range(MAX_LOOPS):
@@ -237,7 +237,7 @@ Answer:"""
                 step("Scores below threshold — broadening retrieval…")
                 top_k = top_k + 3  # _retrieve() already caps to collection.count()
 
-        if draft_answer:
+        if draft_answer and gen_prompt:
             step("Streaming best available answer…")
             return services.stream_llm(
                 gen_prompt, on_token=lambda t: on_step and on_step(("token", t))

@@ -30,9 +30,8 @@ class MultilingualRAGPipeline:
         if not documents:
             return
 
-        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"multi_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        ids = [f"multi_{uuid.uuid4().hex}" for _ in range(len(documents))]
         metadatas = [
             {k: v for k, v in doc.metadata.items()
              if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
@@ -59,8 +58,8 @@ class MultilingualRAGPipeline:
             n_results=n,
             include=["documents", "metadatas"],
         )
-        docs = results["documents"][0]
-        metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
+        docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
+        metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
 
         step("Re-ranking with cross-encoder…")
         scored = services.rerank(query, docs, top_n=4)

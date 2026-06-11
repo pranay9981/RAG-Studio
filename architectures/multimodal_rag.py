@@ -1,3 +1,4 @@
+import os
 import uuid
 from typing import List
 from langchain_core.documents import Document
@@ -31,9 +32,8 @@ class MultimodalRAGPipeline:
         if not documents:
             return
 
-        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"multi_mod_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        ids = [f"multi_mod_{uuid.uuid4().hex}" for _ in range(len(documents))]
         metadatas = [
             {k: v for k, v in doc.metadata.items() if isinstance(v, (str, int, float, bool))}
             for doc in documents
@@ -86,11 +86,17 @@ class MultimodalRAGPipeline:
             # Use window_text for richer context when available
             ctx_text = services.get_context_text(doc_text, meta)
             content.append({"type": "text", "text": f"--- Document {idx + 1} ---\n{ctx_text}\n"})
-            if meta and "image_base64" in meta:
-                content.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{meta['image_base64']}"},
-                })
+            img_path = (meta or {}).get("image_path", "")
+            if img_path and os.path.exists(img_path):
+                try:
+                    with open(img_path) as fh:
+                        b64_data = fh.read()
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"},
+                    })
+                except Exception:
+                    pass
 
         message = HumanMessage(content=content)
 

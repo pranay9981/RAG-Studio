@@ -42,9 +42,8 @@ class CorrectiveRAGPipeline:
     def ingest(self, documents: List[Document]):
         if not documents:
             return
-        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"crag_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        ids = [f"crag_{uuid.uuid4().hex}" for _ in range(len(documents))]
         metadatas = [doc.metadata for doc in documents]
         embeddings = services.embeddings.embed_documents(texts)
         self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)

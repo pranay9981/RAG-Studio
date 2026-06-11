@@ -106,9 +106,8 @@ Text:
         if not documents:
             return
 
-        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"graph_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        ids = [f"graph_{uuid.uuid4().hex}" for _ in range(len(documents))]
         metadatas = [
             {k: v for k, v in doc.metadata.items()
              if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}

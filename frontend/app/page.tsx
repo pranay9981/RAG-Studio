@@ -52,6 +52,11 @@ export default function Page() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
+  // Cleanup EventSource on unmount
+  useEffect(() => {
+    return () => { cleanupRef.current?.() }
+  }, [])
+
   // Load architectures + hydrate doc library + check API key
   useEffect(() => {
     getArchitectures().then(list => {
@@ -410,7 +415,7 @@ export default function Page() {
               </button>
             </div>
             {graphHtml
-              ? <iframe srcDoc={graphHtml} className="flex-1 w-full border-0" sandbox="allow-scripts allow-same-origin" title="Knowledge Graph" />
+              ? <iframe srcDoc={graphHtml} className="flex-1 w-full border-0" sandbox="allow-scripts" title="Knowledge Graph" />
               : <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">No graph data yet — ingest a document first</div>
             }
           </div>

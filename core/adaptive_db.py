@@ -64,19 +64,6 @@ class AdaptiveDB:
             )
             self.conn.commit()
 
-    def get_positive_sources(self, arch_key: str) -> List[str]:
-        rows = self.conn.execute(
-            "SELECT chunk_ids FROM feedback WHERE arch_key = ? AND rating > 0 ORDER BY ts DESC LIMIT 100",
-            (arch_key,),
-        ).fetchall()
-        result = []
-        for (chunk_ids_json,) in rows:
-            try:
-                result.extend(json.loads(chunk_ids_json))
-            except Exception as e:
-                print(f"[adaptive_db] chunk_ids parse error: {e}")
-        return result
-
     # ── Semantic cache ────────────────────────────────────────────────────────
 
     def find_similar_query(
@@ -87,11 +74,12 @@ class AdaptiveDB:
         except ImportError:
             return None
 
-        rows = self.conn.execute(
-            "SELECT query_text, query_embedding, answer, sources FROM query_cache "
-            "WHERE arch_key = ? ORDER BY ts DESC LIMIT 100",
-            (arch_key,),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT query_text, query_embedding, answer, sources FROM query_cache "
+                "WHERE arch_key = ? ORDER BY ts DESC LIMIT 100",
+                (arch_key,),
+            ).fetchall()
         if not rows:
             return None
 
@@ -147,9 +135,10 @@ class AdaptiveDB:
             self.conn.commit()
 
     def get_cache_count(self, arch_key: str) -> int:
-        row = self.conn.execute(
-            "SELECT COUNT(*) FROM query_cache WHERE arch_key = ?", (arch_key,)
-        ).fetchone()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT COUNT(*) FROM query_cache WHERE arch_key = ?", (arch_key,)
+            ).fetchone()
         return row[0] if row else 0
 
     # ── Analytics ─────────────────────────────────────────────────────────────
@@ -184,24 +173,25 @@ class AdaptiveDB:
             self.conn.commit()
 
     def get_analytics(self) -> Dict:
-        rows = self.conn.execute("""
-            SELECT arch_key,
-                SUM(CASE WHEN elapsed > 0 THEN 1 ELSE 0 END) as qcount,
-                AVG(CASE WHEN elapsed > 0 THEN elapsed END) as avg_elapsed,
-                AVG(CASE WHEN faithfulness > 0 THEN faithfulness END) as avg_faith,
-                AVG(CASE WHEN relevance > 0 THEN relevance END) as avg_rel,
-                AVG(CASE WHEN context_precision > 0 THEN context_precision END) as avg_cp,
-                AVG(CASE WHEN context_recall > 0 THEN context_recall END) as avg_cr,
-                SUM(cached) as cache_hits
-            FROM analytics GROUP BY arch_key
-        """).fetchall()
+        with self._lock:
+            rows = self.conn.execute("""
+                SELECT arch_key,
+                    SUM(CASE WHEN elapsed > 0 THEN 1 ELSE 0 END) as qcount,
+                    AVG(CASE WHEN elapsed > 0 THEN elapsed END) as avg_elapsed,
+                    AVG(CASE WHEN faithfulness > 0 THEN faithfulness END) as avg_faith,
+                    AVG(CASE WHEN relevance > 0 THEN relevance END) as avg_rel,
+                    AVG(CASE WHEN context_precision > 0 THEN context_precision END) as avg_cp,
+                    AVG(CASE WHEN context_recall > 0 THEN context_recall END) as avg_cr,
+                    SUM(cached) as cache_hits
+                FROM analytics GROUP BY arch_key
+            """).fetchall()
 
-        fb_rows = self.conn.execute("""
-            SELECT arch_key,
-                SUM(CASE WHEN rating > 0 THEN 1 ELSE 0 END) as pos,
-                COUNT(*) as total
-            FROM feedback GROUP BY arch_key
-        """).fetchall()
+            fb_rows = self.conn.execute("""
+                SELECT arch_key,
+                    SUM(CASE WHEN rating > 0 THEN 1 ELSE 0 END) as pos,
+                    COUNT(*) as total
+                FROM feedback GROUP BY arch_key
+            """).fetchall()
 
         fb_map = {r[0]: {"positive": r[1], "total": r[2]} for r in fb_rows}
 
@@ -222,10 +212,11 @@ class AdaptiveDB:
         return result
 
     def get_feedback_docs(self, arch_key: str):
-        rows = self.conn.execute(
-            "SELECT chunk_ids, rating FROM feedback WHERE arch_key = ? ORDER BY ts DESC LIMIT 500",
-            (arch_key,),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT chunk_ids, rating FROM feedback WHERE arch_key = ? ORDER BY ts DESC LIMIT 500",
+                (arch_key,),
+            ).fetchall()
         positive, negative = set(), set()
         for (chunk_ids_json, rating) in rows:
             try:
@@ -261,11 +252,12 @@ class AdaptiveDB:
         return list(new_texts), list(new_metas)
 
     def get_recent_queries(self, limit: int = 20) -> List[Dict]:
-        rows = self.conn.execute(
-            "SELECT arch_key, query, elapsed, ts FROM analytics "
-            "WHERE elapsed > 0 ORDER BY ts DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT arch_key, query, elapsed, ts FROM analytics "
+                "WHERE elapsed > 0 ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [
             {"arch_key": r[0], "query": r[1], "elapsed": round(r[2], 2), "ts": r[3]}
             for r in rows

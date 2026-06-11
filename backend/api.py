@@ -4,6 +4,7 @@ import json
 import time
 import base64
 import asyncio
+import socket
 import tempfile
 import threading
 import urllib.request
@@ -72,12 +73,24 @@ def fetch_url_text(url: str) -> str:
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="Only http and https URLs are supported")
     host = parsed.hostname or ""
+    if not host:
+        raise HTTPException(status_code=400, detail="Could not parse hostname")
+    # Resolve DNS and validate every returned IP
     try:
-        addr = ipaddress.ip_address(host)
-        if addr.is_private or addr.is_loopback or addr.is_link_local:
-            raise HTTPException(status_code=400, detail="Internal network URLs are not allowed")
-    except ValueError:
-        pass  # hostname, not IP literal — allow DNS to resolve
+        addr_infos = socket.getaddrinfo(host, None)
+        for *_, sockaddr in addr_infos:
+            ip_str = sockaddr[0]
+            try:
+                addr = ipaddress.ip_address(ip_str)
+                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"URL resolves to a private or internal address ({ip_str})"
+                    )
+            except ValueError:
+                pass
+    except socket.gaierror as e:
+        raise HTTPException(status_code=400, detail=f"DNS resolution failed: {e}")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         html = resp.read().decode("utf-8", errors="replace")
@@ -174,9 +187,16 @@ async def process_file(file: UploadFile) -> List[Document]:
         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
     ])
     summary = services.extract_response_text(services.llm.invoke([msg]))
+    import uuid as _uuid
+    img_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'adaptive_data', 'images')
+    os.makedirs(img_dir, exist_ok=True)
+    img_filename = f"{_uuid.uuid4().hex}.b64"
+    img_path = os.path.join(img_dir, img_filename)
+    with open(img_path, 'w') as fh:
+        fh.write(b64)
     return [Document(
         page_content=f"Image Description: {summary}",
-        metadata={"source": source, "type": "image", "image_base64": b64},
+        metadata={"source": source, "type": "image", "image_path": img_path},
     )]
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -261,13 +281,13 @@ async def ingest_document(
         if pipeline:
             try:
                 pipeline.ingest(docs)
-                session.ingested_archs.add(arch_key)
+                session.add_ingested_arch(arch_key)
                 ingested.append(arch_key)
             except Exception as exc:
                 print(f"[ingest] {arch_key} failed: {exc}")
 
     if ingested:
-        session.doc_library.append({"name": source_name, "chunks": len(docs)})
+        session.append_doc({"name": source_name, "chunks": len(docs)})
     return {"chunks": len(docs), "source": source_name, "architectures": ingested}
 
 
@@ -363,7 +383,7 @@ async def query_stream(
 
                 if kind in ("done", "error"):
                     if kind == "done":
-                        session.history.append({
+                        session.append_history({
                             "query":   query,
                             "arch":    arch_key,
                             "elapsed": elapsed,
@@ -388,7 +408,7 @@ async def query_stream(
                         try:
                             event = q.get_nowait()
                         except Empty:
-                            break
+                            return
                         kind, content = event
                         if kind == "sources":
                             collected_sources.extend(content)
@@ -408,7 +428,7 @@ async def query_stream(
                         yield f"data: {payload}\n\n"
                         if kind in ("done", "error"):
                             if kind == "done":
-                                session.history.append({"query": query, "arch": arch_key, "elapsed": elapsed, "answer": collected_answer[:120]})
+                                session.append_history({"query": query, "arch": arch_key, "elapsed": elapsed, "answer": collected_answer[:120]})
                                 adaptive_db.store_query_analytics(arch_key, query, elapsed)
                                 if collected_answer and query_embedding:
                                     try:
@@ -416,7 +436,7 @@ async def query_stream(
                                     except Exception as e:
                                         print(f"[cache] store_query_cache failed: {e}")
                             return
-                    break
+                    return
                 await asyncio.sleep(0.01)
 
     return StreamingResponse(
@@ -623,10 +643,9 @@ async def delete_document(request: DeleteDocumentRequest):
             del structured._table_store[k]
 
     # Update session doc_library and ingested_archs
-    session.doc_library = [
-        d for d in session.doc_library
-        if d.get("name", "").split("/")[-1].split("\\")[-1] != request.source
-    ]
+    session.filter_doc_library(
+        lambda d: d.get("name", "").split("/")[-1].split("\\")[-1] != request.source
+    )
     for arch_key, state_key in STATE_KEY_MAP.items():
         p = session.get_pipeline(state_key)
         if p and hasattr(p, "collection") and p.collection.count() == 0:

@@ -1,10 +1,34 @@
 import uuid
 import json
 import re
+import ast as _ast
 from typing import List
 from langchain_core.documents import Document
 from core.shared_services import services
 from core.adaptive_db import adaptive_db
+
+_ALLOWED_AST_NODES = frozenset({
+    _ast.Expression, _ast.Call, _ast.Attribute, _ast.Subscript,
+    _ast.Name, _ast.Constant, _ast.List, _ast.Tuple, _ast.Dict,
+    _ast.BinOp, _ast.UnaryOp, _ast.Compare, _ast.BoolOp, _ast.IfExp,
+    _ast.Add, _ast.Sub, _ast.Mult, _ast.Div, _ast.Mod, _ast.Pow,
+    _ast.FloorDiv, _ast.Eq, _ast.NotEq, _ast.Lt, _ast.LtE,
+    _ast.Gt, _ast.GtE, _ast.And, _ast.Or, _ast.Not, _ast.USub,
+    _ast.Load,
+})
+
+
+def _ast_safe_eval(code: str, df, pd):
+    try:
+        tree = _ast.parse(code, mode='eval')
+    except SyntaxError as e:
+        raise ValueError(f"Syntax error in generated expression: {e}")
+    for node in _ast.walk(tree):
+        if type(node) not in _ALLOWED_AST_NODES:
+            raise ValueError(f"Disallowed operation in expression: {type(node).__name__}")
+        if isinstance(node, _ast.Attribute) and node.attr.startswith('_'):
+            raise ValueError(f"Private/dunder attribute access forbidden: {node.attr}")
+    return eval(compile(tree, '<expr>', 'eval'), {"__builtins__": {}}, {"df": df, "pd": pd})
 
 
 class StructuredRAGPipeline:
@@ -57,9 +81,8 @@ class StructuredRAGPipeline:
     def ingest(self, documents: List[Document]):
         if not documents:
             return
-        existing = self.collection.count()
         texts = [doc.page_content for doc in documents]
-        ids = [f"struct_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+        ids = [f"struct_{uuid.uuid4().hex}" for _ in range(len(documents))]
         metadatas = [
             {k: v for k, v in doc.metadata.items()
              if isinstance(v, (str, int, float, bool)) and len(str(v)) < 8192}
@@ -106,17 +129,7 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
             if "DATA:\n" in csv_text:
                 data_part = csv_text.split("DATA:\n", 1)[1]
             df = pd.read_csv(io.StringIO(data_part))
-            _FORBIDDEN = (
-                "import", "exec", "eval", "__", "open(", "os.", "sys.",
-                "subprocess", "shutil", "globals", "locals", "getattr",
-                "setattr", "delattr", "compile", "input", "print(",
-                "breakpoint", "vars(", "dir(",
-            )
-            if any(p in code for p in _FORBIDDEN):
-                raise ValueError("Unsafe pattern detected in generated pandas expression")
-            if "__" in code:
-                raise ValueError("Dunder access forbidden in pandas expression")
-            result = eval(code, {"__builtins__": None}, {"df": df, "pd": pd})
+            result = _ast_safe_eval(code, df, pd)
             return f"**Pandas result:** `{code}`\n\nResult:\n```\n{str(result)[:1200]}\n```"
         except Exception as e:
             print(f"[structured_rag] pandas query failed: {e}")
@@ -153,8 +166,8 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
             n_results=n,
             include=["documents", "metadatas"],
         )
-        docs = results["documents"][0]
-        metas = results["metadatas"][0] if results["metadatas"] else [{}] * len(docs)
+        docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
+        metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
 
         docs, metas = adaptive_db.apply_feedback_boost(docs, metas, self.arch_key)
 

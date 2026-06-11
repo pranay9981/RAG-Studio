@@ -52,18 +52,31 @@ export function streamQuery(
 ): () => void {
   const params = new URLSearchParams({ session_id: sessionId, query, arch_key: archKey })
   const es = new EventSource(`${BASE}/api/query?${params}`)
+  let intentionallyClosed = false
 
   es.onmessage = (e) => {
     const d = JSON.parse(e.data)
     if (d.type === 'step') callbacks.onStep(d.content)
     else if (d.type === 'token') callbacks.onToken(d.content)
     else if (d.type === 'sources') callbacks.onSources(d.content)
-    else if (d.type === 'done') { callbacks.onDone(d.answer, d.elapsed, d.cached || false); es.close() }
-    else if (d.type === 'error') { callbacks.onError(d.content); es.close() }
+    else if (d.type === 'done') {
+      intentionallyClosed = true
+      callbacks.onDone(d.answer, d.elapsed, d.cached || false)
+      es.close()
+    }
+    else if (d.type === 'error') {
+      intentionallyClosed = true
+      callbacks.onError(d.content)
+      es.close()
+    }
   }
-  es.onerror = () => { callbacks.onError('Connection error — is the backend running?'); es.close() }
+  es.onerror = () => {
+    if (intentionallyClosed) return
+    callbacks.onError('Connection error — is the backend running?')
+    es.close()
+  }
 
-  return () => es.close()
+  return () => { intentionallyClosed = true; es.close() }
 }
 
 export async function compareAll(query: string, sessionId = 'default'): Promise<CompareResult[]> {
