@@ -98,14 +98,24 @@ Questions:"""
     def planner_node(self, state: AgentState) -> Dict:
         last_msg = state["messages"][-1].content
         has_docs = self.collection.count() > 0
-        prompt = f"""You are a Planner Agent. Analyze this query and decide how to answer it.
+
+        if has_docs:
+            # Documents available — always retrieve; only choose between vector and web
+            prompt = f"""You are a Planner Agent. A knowledge base with ingested documents is available.
 Query: '{last_msg}'
-Documents available in database: {'YES' if has_docs else 'NO'}
 
 Choose exactly one:
-- VECTOR_SEARCH  ->query asks about the uploaded document / provided text
-- WEB_SEARCH     ->query needs current events or general knowledge not in the document
-- ANSWER         ->you already have enough context from previous steps
+- VECTOR_SEARCH  ->query is about the ingested documents or their content (default choice)
+- WEB_SEARCH     ->query clearly requires real-time data or info not present in the documents
+
+Output ONLY the option name, nothing else."""
+        else:
+            prompt = f"""You are a Planner Agent. No documents have been ingested.
+Query: '{last_msg}'
+
+Choose exactly one:
+- WEB_SEARCH  ->search the web for the answer
+- ANSWER      ->answer from general knowledge alone
 
 Output ONLY the option name, nothing else."""
 
