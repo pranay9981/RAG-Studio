@@ -39,7 +39,8 @@ class MultimodalRAGPipeline:
             for doc in documents
         ]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        with services._chroma_lock:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def query(self, query: str, on_step=None) -> str:
         def step(msg):

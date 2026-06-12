@@ -45,7 +45,8 @@ class HyDERAGPipeline:
         ]
         ids = [f"hyde_{uuid.uuid4().hex}" for _ in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        with services._chroma_lock:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def _generate_hypothetical_document(self, query: str) -> str:
         prompt = f"""Write a detailed, factual passage that would perfectly answer the following question.

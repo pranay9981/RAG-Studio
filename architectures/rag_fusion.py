@@ -38,7 +38,8 @@ class RAGFusionPipeline:
         ]
         ids = [f"ragfusion_{uuid.uuid4().hex}" for _ in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        with services._chroma_lock:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def _generate_sub_queries(self, query: str, n: int = 4) -> List[str]:
         prompt = f"""You are an expert at generating multiple search queries for document retrieval.

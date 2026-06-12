@@ -48,14 +48,16 @@ class MultilingualRAGPipeline:
         ]
         embeddings = services.multilingual_embeddings.embed_documents(texts)
         try:
-            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+            with services._chroma_lock:
+                self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
         except Exception as e:
             if "dimension" in str(e).lower():
                 # Stale collection with wrong embedding dim — recreate and retry
                 print(f"[multilingual_rag] Dimension mismatch on add — recreating collection and retrying")
                 services.chroma_client.delete_collection(self.collection_name)
                 self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-                self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+                with services._chroma_lock:
+                    self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
             else:
                 raise
 

@@ -21,7 +21,7 @@ const PIPELINE_STEPS: Record<string, string[]> = {
 }
 
 const ADAPTIVE_FEATURES = [
-  { icon: '⚡', label: 'Semantic Cache', desc: 'Similar past queries return instantly (cosine > 0.92)' },
+  { icon: '⚡', label: 'Semantic Cache', desc: 'Similar past queries return instantly (cosine > 0.95)' },
   { icon: '🔍', label: 'Context Quality Eval', desc: 'Checks if retrieved context is CORRECT/AMBIGUOUS/INCORRECT before generating' },
   { icon: '🌐', label: 'Web Fallback', desc: 'Auto-fetches from DuckDuckGo if local context is insufficient' },
   { icon: '👍', label: 'Feedback Tracking', desc: 'Thumbs up/down ratings stored and reflected in analytics' },

@@ -668,7 +668,8 @@ async def delete_document(request: DeleteDocumentRequest):
                 if (meta or {}).get("source", "") == request.source
             ]
             if ids_to_delete:
-                pipeline.collection.delete(ids=ids_to_delete)
+                with services._chroma_lock:
+                    pipeline.collection.delete(ids=ids_to_delete)
                 total_deleted += len(ids_to_delete)
         except Exception as e:
             print(f"[delete_document] {arch_key} failed: {e}")
@@ -688,6 +689,9 @@ async def delete_document(request: DeleteDocumentRequest):
         p = session.get_pipeline(state_key)
         if p and hasattr(p, "collection") and p.collection.count() == 0:
             session.ingested_archs.discard(arch_key)
+
+    if total_deleted > 0:
+        adaptive_db.clear_cache()
 
     return {"deleted": total_deleted, "source": request.source}
 

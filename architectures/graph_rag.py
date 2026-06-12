@@ -114,7 +114,8 @@ Text:
             for doc in documents
         ]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        with services._chroma_lock:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
         for doc in documents:
             triples = self._extract_entities_and_relationships(doc.page_content)
@@ -130,9 +131,13 @@ Text:
     def _extract_query_entities(self, query: str) -> List[str]:
         prompt = f"""Extract the main entities from this query. Output ONLY a comma-separated list of entity names, nothing else.
 Query: {query}"""
-        response = services.llm.invoke(prompt)
-        text = services.extract_response_text(response)
-        return [e.strip() for e in text.split(",") if e.strip()]
+        try:
+            response = services.llm.invoke(prompt)
+            text = services.extract_response_text(response)
+            return [e.strip() for e in text.split(",") if e.strip()]
+        except Exception as e:
+            print(f"[graph_rag] entity extraction failed: {e}")
+            return []
 
     def render_graph_html(self, max_nodes: int = 80) -> str:
         from pyvis.network import Network

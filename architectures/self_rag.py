@@ -52,7 +52,8 @@ class SelfRAGPipeline:
         ]
         ids = [f"selfrag_{uuid.uuid4().hex}" for _ in range(len(documents))]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        with services._chroma_lock:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def _retrieve(self, query: str, top_k: int) -> Tuple[List[str], List[dict]]:
         n = min(top_k, self.collection.count())
