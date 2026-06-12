@@ -70,19 +70,28 @@ class SharedServices:
                         collection = self.chroma_client.get_or_create_collection(collection_name)
                     continue
                 if is_hnsw:
-                    # All handle-refresh retries exhausted — rebuild from SQLite-stored data
+                    # All handle-refresh retries exhausted — rebuild from SQLite docs + re-embed.
+                    # Embeddings are stored inside HNSW segment files, so include=["embeddings"]
+                    # also fails when HNSW is broken. Read only documents/metadata (SQLite-only),
+                    # re-embed locally, then delete-and-recreate to build a fresh HNSW index.
                     try:
                         with self._chroma_lock:
-                            existing = collection.get(include=["documents", "embeddings", "metadatas"])
+                            existing = collection.get(include=["documents", "metadatas"])
                         if existing and existing.get("ids"):
                             print(f"[chroma] HNSW unrecoverable for {collection_name}, rebuilding {len(existing['ids'])} docs…")
+                            emb_fn = (
+                                self.multilingual_embeddings
+                                if "multilingual" in collection_name
+                                else self.embeddings
+                            )
+                            new_embeddings = emb_fn.embed_documents(existing["documents"])
                             with self._chroma_lock:
                                 self.chroma_client.delete_collection(collection_name)
                                 new_col = self.chroma_client.get_or_create_collection(collection_name)
                                 new_col.add(
                                     ids=existing["ids"],
                                     documents=existing["documents"],
-                                    embeddings=existing["embeddings"],
+                                    embeddings=new_embeddings,
                                     metadatas=existing["metadatas"],
                                 )
                             with self._chroma_lock:
