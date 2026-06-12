@@ -14,8 +14,8 @@ class MultilingualRAGPipeline:
             # Detect stale collection created with MiniLM (384-dim) instead of BGE-M3 (1024-dim)
             if self.collection.count() > 0:
                 with services._chroma_lock:
-                    sample = self.collection.get(include=["embeddings"], limit=1)
-                embs = sample.get("embeddings") or []
+                    sample = self.collection.get(include=["embeddings"])
+                embs = (sample.get("embeddings") or [])[:1]
                 if embs and len(embs[0]) != 1024:
                     print(f"[multilingual_rag] Dimension mismatch ({len(embs[0])} vs 1024) — recreating collection")
                     services.chroma_client.delete_collection(self.collection_name)

@@ -146,7 +146,7 @@ export default function DocumentManager({ archKeys, onIngested, docLibrary, onDo
           <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest px-1">Ingested</p>
           {uniqueDocs.map((d, i) => {
             const label = d.name.split('/').pop()?.split('\\').pop() || d.name
-            const isDeleting = deletingSource === label
+            const isDeleting = deletingSource === d.name
             return (
               <div key={i} className="flex items-center gap-2 group px-2 py-1.5 rounded-xl hover:bg-white/[0.03] transition-colors">
                 <div className="w-5 h-5 rounded-lg bg-violet-500/10 border border-violet-500/15 flex items-center justify-center flex-shrink-0">
@@ -155,7 +155,7 @@ export default function DocumentManager({ archKeys, onIngested, docLibrary, onDo
                 <span className="text-[11px] text-slate-400 truncate flex-1" title={d.name}>{label}</span>
                 <span className="text-[10px] font-mono text-slate-700 flex-shrink-0">{d.chunks}c</span>
                 <button
-                  onClick={() => handleDelete(label)}
+                  onClick={() => handleDelete(d.name)}
                   disabled={isDeleting}
                   className="opacity-0 group-hover:opacity-100 flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center text-slate-700 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-all"
                 >

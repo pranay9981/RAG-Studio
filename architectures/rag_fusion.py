@@ -52,9 +52,7 @@ Original query: {query}
         text = services.extract_response_text(response)
         queries = [q.strip().lstrip("-•123456789. ") for q in text.strip().split("\n") if q.strip()]
         queries = [q for q in queries if len(q) > 5]
-        if len(queries) < n:
-            queries += [query] * (n - len(queries))
-        return queries[:n]
+        return queries[:n] if queries else [query]
 
     def _reciprocal_rank_fusion(
         self, all_ranked_lists: List[List[Dict]], k: int = 60

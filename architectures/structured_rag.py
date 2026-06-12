@@ -17,6 +17,17 @@ _ALLOWED_AST_NODES = frozenset({
     _ast.Load,
 })
 
+_ALLOWED_ATTRS = frozenset({
+    'head', 'tail', 'describe', 'shape', 'dtypes', 'columns', 'index',
+    'values', 'sum', 'mean', 'median', 'std', 'min', 'max', 'count',
+    'groupby', 'sort_values', 'filter', 'loc', 'iloc', 'query',
+    'to_dict', 'to_csv', 'to_string', 'reset_index', 'drop', 'rename',
+    'merge', 'join', 'agg', 'apply', 'str', 'dt', 'cat',
+    'size', 'unique', 'nunique', 'value_counts', 'idxmax', 'idxmin',
+    'nlargest', 'nsmallest', 'cumsum', 'cumprod', 'diff', 'fillna',
+    'dropna', 'isna', 'notna', 'astype', 'copy', 'items', 'iterrows',
+})
+
 
 def _ast_safe_eval(code: str, df, pd):
     try:
@@ -25,9 +36,12 @@ def _ast_safe_eval(code: str, df, pd):
         raise ValueError(f"Syntax error in generated expression: {e}")
     for node in _ast.walk(tree):
         if type(node) not in _ALLOWED_AST_NODES:
-            raise ValueError(f"Disallowed operation in expression: {type(node).__name__}")
-        if isinstance(node, _ast.Attribute) and node.attr.startswith('_'):
-            raise ValueError(f"Private/dunder attribute access forbidden: {node.attr}")
+            raise ValueError(f"Disallowed AST node: {type(node).__name__}")
+        if isinstance(node, _ast.Attribute):
+            if node.attr.startswith('_') or node.attr not in _ALLOWED_ATTRS:
+                raise ValueError(f"Disallowed attribute: {node.attr}")
+        if isinstance(node, _ast.Name) and node.id not in ('df', 'pd', 'True', 'False', 'None'):
+            raise ValueError(f"Disallowed name: {node.id}")
     return eval(compile(tree, '<expr>', 'eval'), {"__builtins__": {}}, {"df": df, "pd": pd})
 
 

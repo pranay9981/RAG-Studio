@@ -11,6 +11,7 @@ class CRAGState(TypedDict):
     documents: List[str]
     evaluation: str
     rewritten_query: str
+    answer: str
 
 
 class CorrectiveRAGPipeline:
@@ -118,7 +119,7 @@ Answer:"""
                 self._on_step(("token", t))
 
         text = services.stream_llm(prompt, on_token=tok)
-        return {"documents": [text]}
+        return {"answer": text}
 
     def route_evaluation(self, state: CRAGState) -> str:
         if state["evaluation"] in ("CORRECT", "AMBIGUOUS"):  # use ingested docs for both
@@ -156,6 +157,7 @@ Answer:"""
             "documents": [],
             "evaluation": "",
             "rewritten_query": "",
+            "answer": "",
         }
         trace = []
         final_answer = ""
@@ -175,9 +177,9 @@ Answer:"""
                     elif node_name == "web_search_node":
                         trace.append("**Web Search** ->Fetched external knowledge")
                     elif node_name == "generate_node":
-                        docs = node_state.get("documents", [])
-                        if docs:
-                            final_answer = docs[0]
+                        answer = node_state.get("answer", "")
+                        if answer:
+                            final_answer = answer
 
             if not final_answer:
                 final_answer = "Could not generate an answer. Please ingest a document first."

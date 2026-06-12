@@ -69,12 +69,13 @@ class HybridRAGPipeline:
             metadatas = [doc.metadata for doc in documents]
             embeddings = services.embeddings.embed_documents(texts)
 
-            self.collection.add(
-                documents=texts,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                ids=new_ids,
-            )
+            with services._chroma_lock:
+                self.collection.add(
+                    documents=texts,
+                    embeddings=embeddings,
+                    metadatas=metadatas,
+                    ids=new_ids,
+                )
 
             tokenized_corpus = [doc.page_content.lower().split() for doc in self.chunks]
             self.bm25 = BM25Okapi(tokenized_corpus)

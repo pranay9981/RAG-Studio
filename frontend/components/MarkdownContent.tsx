@@ -127,7 +127,12 @@ export default function MarkdownContent({ content, className }: { content: strin
     if (para.length) {
       nodes.push(
         <p key={nextKey()} className="mb-1.5 last:mb-0 text-slate-200 leading-relaxed">
-          {renderInline(para.join('\n'), nextKey())}
+          {para.map((line, idx) => (
+            <React.Fragment key={idx}>
+              {idx > 0 && <br />}
+              {renderInline(line, nextKey())}
+            </React.Fragment>
+          ))}
         </p>
       )
     }

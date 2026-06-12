@@ -618,12 +618,12 @@ async def list_documents(arch_key: str = Query(...)):
     if not pipeline or not hasattr(pipeline, "collection"):
         raise HTTPException(status_code=400, detail="Pipeline not found")
     try:
-        result = pipeline.collection.get(include=["metadatas"])
+        with services._chroma_lock:
+            result = pipeline.collection.get(include=["metadatas"])
         sources: dict = {}
         for meta in (result["metadatas"] or []):
             raw = (meta or {}).get("source", "Unknown")
-            label = raw.split("/")[-1].split("\\")[-1]
-            sources[label] = sources.get(label, 0) + 1
+            sources[raw] = sources.get(raw, 0) + 1
         return {"documents": [{"source": k, "chunks": v} for k, v in sources.items()]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -637,10 +637,11 @@ async def delete_document(request: DeleteDocumentRequest):
         if not pipeline or not hasattr(pipeline, "collection"):
             continue
         try:
-            result = pipeline.collection.get(include=["metadatas"])
+            with services._chroma_lock:
+                result = pipeline.collection.get(include=["metadatas"])
             ids_to_delete = [
                 doc_id for doc_id, meta in zip(result["ids"] or [], result["metadatas"] or [])
-                if (meta or {}).get("source", "Unknown").split("/")[-1].split("\\")[-1] == request.source
+                if (meta or {}).get("source", "") == request.source
             ]
             if ids_to_delete:
                 pipeline.collection.delete(ids=ids_to_delete)
@@ -651,14 +652,13 @@ async def delete_document(request: DeleteDocumentRequest):
     # Remove from structured RAG table store
     structured = session.get_pipeline("structured_pipeline")
     if structured and hasattr(structured, "_table_store"):
-        keys = [k for k in structured._table_store
-                if k.split("/")[-1].split("\\")[-1] == request.source]
+        keys = [k for k in structured._table_store if k == request.source]
         for k in keys:
             del structured._table_store[k]
 
     # Update session doc_library and ingested_archs
     session.filter_doc_library(
-        lambda d: d.get("name", "").split("/")[-1].split("\\")[-1] != request.source
+        lambda d: d.get("name", "") != request.source
     )
     for arch_key, state_key in STATE_KEY_MAP.items():
         p = session.get_pipeline(state_key)

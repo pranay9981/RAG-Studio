@@ -163,11 +163,12 @@ class GlobalSession:
             self.doc_library = [d for d in self.doc_library if predicate(d)]
 
     def reset(self):
-        for pipeline in self.pipelines.values():
-            pipeline.reset()
-        self.history.clear()
-        self.ingested_archs.clear()
-        self.doc_library.clear()
+        with self._lock:
+            for pipeline in self.pipelines.values():
+                pipeline.reset()
+            self.history.clear()
+            self.ingested_archs.clear()
+            self.doc_library.clear()
 
 
 # Singleton — one shared session for the API server lifetime

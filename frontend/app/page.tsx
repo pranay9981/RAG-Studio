@@ -154,7 +154,7 @@ export default function Page() {
         ),
       }))
     } catch {}
-  }, [allMessages, chatKey, selectedArch])
+  }, [allMessages, chatKey, selectedArch, compareMode])
 
   const handleSend = useCallback(async () => {
     const q = input.trim()

@@ -65,7 +65,8 @@ class SharedServices:
                 err = str(e).lower()
                 if ("hnsw" in err or "nothing found on disk" in err) and attempt < 2:
                     time.sleep(0.5 * (attempt + 1))
-                    collection = self.chroma_client.get_or_create_collection(collection_name)
+                    with self._chroma_lock:
+                        collection = self.chroma_client.get_or_create_collection(collection_name)
                     continue
                 raise
         raise RuntimeError("ChromaDB HNSW error after 3 attempts")

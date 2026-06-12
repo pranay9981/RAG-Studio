@@ -109,14 +109,18 @@ Output ONLY valid JSON: {{"faithfulness": X, "completeness": X, "missing": "..."
         try:
             resp = services.llm.invoke(prompt)
             text = services.extract_response_text(resp)
-            m = re.search(r'\{[^}]+\}', text, re.DOTALL)
-            if m:
-                data = json.loads(m.group())
-                return {
-                    "faithfulness": max(0, min(10, int(data.get("faithfulness", 7)))),
-                    "completeness": max(0, min(10, int(data.get("completeness", 7)))),
-                    "missing": str(data.get("missing", "NONE")),
-                }
+            start = text.find('{')
+            end = text.rfind('}') + 1
+            if start != -1 and end > start:
+                try:
+                    data = json.loads(text[start:end])
+                    return {
+                        "faithfulness": max(0, min(10, int(float(data.get("faithfulness", 7))))),
+                        "completeness": max(0, min(10, int(float(data.get("completeness", 7))))),
+                        "missing": str(data.get("missing", "NONE")),
+                    }
+                except (json.JSONDecodeError, ValueError):
+                    pass
         except Exception as e:
             print(f"[self_rag] critique failed: {e}")
         return {"faithfulness": 7, "completeness": 7, "missing": "NONE"}
