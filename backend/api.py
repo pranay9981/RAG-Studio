@@ -480,11 +480,12 @@ async def compare(request: CompareRequest):
                     _count = _pipeline.collection.count()
                 if _count > 0:
                     _emb = _dummy_1024 if _state_key == "multilingual_pipeline" else _dummy_384
-                    services.chroma_query(
+                    _, warm_coll = services.chroma_query(
                         _pipeline.collection,
                         getattr(_pipeline, 'collection_name', _state_key),
                         query_embeddings=[_emb], n_results=1, include=["ids"],
                     )
+                    _pipeline.collection = warm_coll  # keep fresh/possibly-rebuilt handle
             except Exception:
                 pass  # warm-up failure is non-fatal — real queries will retry
 

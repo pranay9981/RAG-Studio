@@ -52,10 +52,10 @@ class SharedServices:
         self._llm = value
 
     def chroma_query(self, collection, collection_name: str, **kwargs):
-        """Thread-safe ChromaDB query with HNSW-error retry and collection refresh.
+        """Thread-safe ChromaDB query with HNSW-error retry, collection refresh, and rebuild.
 
         Returns (results, collection) — caller should update self.collection with
-        the returned collection in case it was refreshed.
+        the returned collection in case it was refreshed or rebuilt.
         """
         for attempt in range(3):
             try:
@@ -63,11 +63,32 @@ class SharedServices:
                     return collection.query(**kwargs), collection
             except Exception as e:
                 err = str(e).lower()
-                if ("hnsw" in err or "nothing found on disk" in err) and attempt < 2:
+                is_hnsw = "hnsw" in err or "nothing found on disk" in err
+                if is_hnsw and attempt < 2:
                     time.sleep(0.5 * (attempt + 1))
                     with self._chroma_lock:
                         collection = self.chroma_client.get_or_create_collection(collection_name)
                     continue
+                if is_hnsw:
+                    # All handle-refresh retries exhausted — rebuild from SQLite-stored data
+                    try:
+                        with self._chroma_lock:
+                            existing = collection.get(include=["documents", "embeddings", "metadatas"])
+                        if existing and existing.get("ids"):
+                            print(f"[chroma] HNSW unrecoverable for {collection_name}, rebuilding {len(existing['ids'])} docs…")
+                            with self._chroma_lock:
+                                self.chroma_client.delete_collection(collection_name)
+                                new_col = self.chroma_client.get_or_create_collection(collection_name)
+                                new_col.add(
+                                    ids=existing["ids"],
+                                    documents=existing["documents"],
+                                    embeddings=existing["embeddings"],
+                                    metadatas=existing["metadatas"],
+                                )
+                            with self._chroma_lock:
+                                return new_col.query(**kwargs), new_col
+                    except Exception as rebuild_err:
+                        print(f"[chroma] Rebuild failed for {collection_name}: {rebuild_err}")
                 raise
         raise RuntimeError("ChromaDB HNSW error after 3 attempts")
 
