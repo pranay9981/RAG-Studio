@@ -88,7 +88,8 @@ Output (e.g. [true, false, true]):"""
             m = re.search(r'\[.*?\]', text, re.DOTALL)
             if m:
                 grades = json.loads(m.group())
-                return [bool(g) for g in grades[:len(docs)]]
+                padded = [bool(g) for g in grades] + [True] * (len(docs) - len(grades))
+                return padded[:len(docs)]
         except Exception as e:
             print(f"[self_rag] relevance grading failed: {e}")
         return [True] * len(docs)
@@ -250,9 +251,3 @@ Answer:"""
                 step("Scores below threshold — broadening retrieval…")
                 top_k = top_k + 3  # _retrieve() already caps to collection.count()
 
-        if draft_answer and gen_prompt:
-            step("Streaming best available answer…")
-            return services.stream_llm(
-                gen_prompt, on_token=lambda t: on_step and on_step(("token", t))
-            )
-        return "Unable to generate a satisfactory answer for this query."

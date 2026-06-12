@@ -125,8 +125,13 @@ async def process_file(file: UploadFile) -> List[Document]:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as f:
             f.write(content)
             tmp = f.name
-        docs = services.load_pdf(tmp)
-        os.remove(tmp)
+        try:
+            docs = services.load_pdf(tmp)
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
         for doc in docs:
             doc.metadata["source"] = source  # override temp path with original filename
         return docs
@@ -140,10 +145,15 @@ async def process_file(file: UploadFile) -> List[Document]:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as f:
             f.write(content)
             tmp = f.name
-        from docx import Document as DocxDocument
-        docx = DocxDocument(tmp)
-        text = "\n".join(p.text for p in docx.paragraphs if p.text.strip())
-        os.remove(tmp)
+        try:
+            from docx import Document as DocxDocument
+            docx = DocxDocument(tmp)
+            text = "\n".join(p.text for p in docx.paragraphs if p.text.strip())
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
         chunks = services.text_splitter.split_text(text)
         return [Document(page_content=c, metadata={"source": source, "type": "docx"}) for c in chunks]
 
@@ -540,6 +550,16 @@ async def compare(request: CompareRequest):
     for t in threads:
         t.join(timeout=120)
 
+    for i, (t, arch_key) in enumerate(zip(threads, ARCH_KEYS)):
+        if t.is_alive():
+            result_list[i] = {
+                "arch_key": arch_key,
+                "answer": "",
+                "elapsed": 120.0,
+                "sources": [],
+                "error": "Request timed out after 120s",
+            }
+
     return {"results": [r for r in result_list if r is not None]}
 
 
@@ -676,14 +696,23 @@ async def delete_document(request: DeleteDocumentRequest):
         try:
             with services._chroma_lock:
                 result = pipeline.collection.get(include=["metadatas"])
-            ids_to_delete = [
-                doc_id for doc_id, meta in zip(result["ids"] or [], result["metadatas"] or [])
-                if (meta or {}).get("source", "") == request.source
-            ]
+            ids_to_delete = []
+            image_paths_to_delete = []
+            for doc_id, meta in zip(result["ids"] or [], result["metadatas"] or []):
+                if (meta or {}).get("source", "") == request.source:
+                    ids_to_delete.append(doc_id)
+                    img_path = (meta or {}).get("image_path")
+                    if img_path:
+                        image_paths_to_delete.append(img_path)
             if ids_to_delete:
                 with services._chroma_lock:
                     pipeline.collection.delete(ids=ids_to_delete)
                 total_deleted += len(ids_to_delete)
+                for img_path in image_paths_to_delete:
+                    try:
+                        os.remove(img_path)
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[delete_document] {arch_key} failed: {e}")
 
@@ -722,9 +751,11 @@ async def get_config_status():
 
 @app.post("/api/config/apikey")
 async def set_api_key(request: ApiKeyRequest):
-    if not request.api_key.strip():
-        raise HTTPException(status_code=400, detail="API key cannot be empty")
     key = request.api_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="API key cannot be empty")
+    if not re.match(r'^gsk_[A-Za-z0-9]{40,}$', key):
+        raise HTTPException(status_code=400, detail="Invalid API key format")
     os.environ["GROQ_API_KEY"] = key
 
     try:
@@ -735,8 +766,8 @@ async def set_api_key(request: ApiKeyRequest):
             max_tokens=1024,
         )
         return {"status": "ok"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to initialize LLM: {e}")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Failed to initialize LLM with the provided key")
 
 
 @app.delete("/api/sessions/{session_id}")

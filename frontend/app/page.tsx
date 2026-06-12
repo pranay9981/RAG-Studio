@@ -182,8 +182,19 @@ export default function Page() {
           )
         }
         setAllCompareResults(prev => ({ ...prev, [key]: final }))
-        setHistory(prev => [...prev, { query: q, arch: 'Compare All', elapsed: Math.max(...results.map(r => r.elapsed)), answer: '' }])
-      } finally { setCompareLoading(false) }
+        const maxElapsed = results.length ? Math.max(...results.map(r => r.elapsed)) : 0
+        setHistory(prev => [...prev, { query: q, arch: 'Compare All', elapsed: maxElapsed, answer: '' }])
+      } catch (e) {
+        appendMsg(key, {
+          id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+          role: 'assistant',
+          content: `Compare failed: ${e instanceof Error ? e.message : 'Unknown error'}`,
+          arch: 'Compare All',
+          ts: new Date().toISOString(),
+        })
+      } finally {
+        setCompareLoading(false)
+      }
       return
     }
 
@@ -248,10 +259,7 @@ export default function Page() {
   }
 
   const handleDeleteDoc = useCallback((source: string) => {
-    setDocLibrary(prev => prev.filter(d => {
-      const label = d.name.split('/').pop()?.split('\\').pop() || d.name
-      return label !== source && d.name !== source
-    }))
+    setDocLibrary(prev => prev.filter(d => d.name !== source))
   }, [])
 
   const handleExportCurrentChat = useCallback(() => {

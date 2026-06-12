@@ -19,6 +19,9 @@ class SharedServices:
         self._llm = None
         self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         self._multilingual_embeddings = None  # lazy-loaded on first use (BAAI/bge-m3)
+        self._multilingual_lock = threading.Lock()
+        self._cross_encoder_lock = threading.Lock()
+        self._ephemeral_fallback = False
         self.chroma_client = self._init_chroma_client()
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000, chunk_overlap=200
@@ -78,7 +81,7 @@ class SharedServices:
                         with self._chroma_lock:
                             existing = collection.get(include=["documents", "metadatas"])
                         if existing and existing.get("ids"):
-                            print(f"[chroma] HNSW unrecoverable for {collection_name}, rebuilding {len(existing['ids'])} docs…")
+                            print(f"[chroma] HNSW unrecoverable for {collection_name}, rebuilding {len(existing['ids'])} docs...")
                             emb_fn = (
                                 self.multilingual_embeddings
                                 if "multilingual" in collection_name
@@ -86,13 +89,15 @@ class SharedServices:
                             )
                             new_embeddings = emb_fn.embed_documents(existing["documents"])
                             with self._chroma_lock:
+                                # Re-read under lock to capture any concurrent adds before deleting
+                                existing2 = collection.get(include=["documents", "metadatas"])
                                 self.chroma_client.delete_collection(collection_name)
                                 new_col = self.chroma_client.get_or_create_collection(collection_name)
                                 new_col.add(
-                                    ids=existing["ids"],
-                                    documents=existing["documents"],
-                                    embeddings=new_embeddings,
-                                    metadatas=existing["metadatas"],
+                                    ids=existing2["ids"],
+                                    documents=existing2["documents"],
+                                    embeddings=emb_fn.embed_documents(existing2["documents"]),
+                                    metadatas=existing2["metadatas"],
                                 )
                             with self._chroma_lock:
                                 return new_col.query(**kwargs), new_col
@@ -117,14 +122,18 @@ class SharedServices:
                     shutil.rmtree(chroma_path, ignore_errors=True)
                 else:
                     print(f"[chroma] retry failed ({e}) — falling back to EphemeralClient")
+                    self._ephemeral_fallback = True
                     return chromadb.EphemeralClient()
+        self._ephemeral_fallback = True
         return chromadb.EphemeralClient()
 
     @property
     def multilingual_embeddings(self):
         if self._multilingual_embeddings is None:
-            print("[shared_services] Loading BAAI/bge-m3 multilingual embeddings (first use)…")
-            self._multilingual_embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+            with self._multilingual_lock:
+                if self._multilingual_embeddings is None:
+                    print("[shared_services] Loading BAAI/bge-m3 multilingual embeddings (first use)...")
+                    self._multilingual_embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
         return self._multilingual_embeddings
 
     # ── Document loading ──────────────────────────────────────────────────────
@@ -176,10 +185,12 @@ class SharedServices:
 
     def rerank(self, query: str, texts: list, top_n: int = 5) -> list:
         if not hasattr(self, "_cross_encoder") or self._cross_encoder is None:
-            from sentence_transformers import CrossEncoder
-            self._cross_encoder = CrossEncoder(
-                "cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512
-            )
+            with self._cross_encoder_lock:
+                if not hasattr(self, "_cross_encoder") or self._cross_encoder is None:
+                    from sentence_transformers import CrossEncoder
+                    self._cross_encoder = CrossEncoder(
+                        "cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512
+                    )
         pairs = [[query, t] for t in texts]
         import numpy as np
         scores = self._cross_encoder.predict(pairs)

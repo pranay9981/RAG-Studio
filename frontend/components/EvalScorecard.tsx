@@ -21,7 +21,7 @@ function ScoreBar({ label, score }: { label: string; score: number | null | unde
 
 export default function EvalScorecard({ scores }: Props) {
   const avg = [scores.faithfulness, scores.relevance, scores.context_precision, scores.context_recall]
-    .filter(v => v != null && v > 0)
+    .filter((v): v is number => v != null)
   const avgScore = avg.length ? Math.round(avg.reduce((a, b) => a + b!, 0) / avg.length) : null
   const avgColor = avgScore == null ? '#475569' : avgScore >= 7 ? '#10b981' : avgScore >= 4 ? '#f59e0b' : '#ef4444'
 

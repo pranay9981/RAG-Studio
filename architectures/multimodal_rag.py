@@ -1,3 +1,4 @@
+import base64
 import os
 import uuid
 from typing import List
@@ -22,11 +23,12 @@ class MultimodalRAGPipeline:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def reset(self):
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        with services._chroma_lock:
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def ingest(self, documents: List[Document]):
         if not documents:
@@ -47,7 +49,8 @@ class MultimodalRAGPipeline:
             if on_step:
                 on_step(("step", msg))
 
-        if not self.collection.count():
+        count = self.collection.count()
+        if not count:
             return "No documents ingested yet."
 
         step("Embedding query…")
@@ -56,7 +59,7 @@ class MultimodalRAGPipeline:
         step("Retrieving documents and images from ChromaDB…")
         results, self.collection = services.chroma_query(
             self.collection, self.collection_name,
-            query_embeddings=[query_embedding], n_results=min(6, self.collection.count()),
+            query_embeddings=[query_embedding], n_results=min(6, count),
             include=["documents", "metadatas"],
         )
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
@@ -102,8 +105,8 @@ class MultimodalRAGPipeline:
             img_path = (meta or {}).get("image_path", "")
             if img_path and os.path.exists(img_path):
                 try:
-                    with open(img_path) as fh:
-                        b64_data = fh.read()
+                    with open(img_path, "rb") as fh:
+                        b64_data = base64.b64encode(fh.read()).decode("utf-8")
                     content.append({
                         "type": "image_url",
                         "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"},

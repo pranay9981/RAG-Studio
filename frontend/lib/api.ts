@@ -54,45 +54,52 @@ export function streamQuery(
   const es = new EventSource(`${BASE}/api/query?${params}`)
   let intentionallyClosed = false
 
-  es.onmessage = (e) => {
-    const d = JSON.parse(e.data)
-    if (d.type === 'step') callbacks.onStep(d.content)
-    else if (d.type === 'token') callbacks.onToken(d.content)
-    else if (d.type === 'sources') callbacks.onSources(d.content)
-    else if (d.type === 'done') {
+  const timeoutId = setTimeout(() => {
+    if (!intentionallyClosed) {
       intentionallyClosed = true
-      callbacks.onDone(d.answer, d.elapsed, d.cached || false)
+      es.close()
+      callbacks.onError('Request timed out after 2 minutes')
+    }
+  }, 120000)
+
+  es.onmessage = (e) => {
+    let d: Record<string, unknown>
+    try { d = JSON.parse(e.data) } catch { return }
+    if (d.type === 'step') callbacks.onStep(d.content as string)
+    else if (d.type === 'token') callbacks.onToken(d.content as string)
+    else if (d.type === 'sources') callbacks.onSources(d.content as Source[])
+    else if (d.type === 'done') {
+      clearTimeout(timeoutId)
+      intentionallyClosed = true
+      callbacks.onDone(d.answer as string, d.elapsed as number, (d.cached as boolean) || false)
       es.close()
     }
     else if (d.type === 'error') {
+      clearTimeout(timeoutId)
       intentionallyClosed = true
-      callbacks.onError(d.content)
+      callbacks.onError(d.content as string)
       es.close()
     }
   }
   es.onerror = () => {
+    clearTimeout(timeoutId)
     if (intentionallyClosed) return
     callbacks.onError('Connection error — is the backend running?')
     es.close()
   }
 
-  return () => { intentionallyClosed = true; es.close() }
+  return () => { clearTimeout(timeoutId); intentionallyClosed = true; es.close() }
 }
 
 export async function compareAll(query: string, sessionId = 'default'): Promise<CompareResult[]> {
-  try {
-    const r = await fetch(`${BASE}/api/compare`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, session_id: sessionId }),
-    })
-    if (!r.ok) throw new Error(`Compare failed: ${r.status}`)
-    const data = await r.json()
-    return data.results ?? []
-  } catch (e) {
-    console.error('[compareAll]', e)
-    return []
-  }
+  const r = await fetch(`${BASE}/api/compare`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, session_id: sessionId }),
+  })
+  if (!r.ok) throw new Error(`Compare failed: ${r.status}`)
+  const data = await r.json()
+  return (data.results ?? []) as CompareResult[]
 }
 
 export async function evaluateAnswer(query: string, answer: string, sources: Source[], archKey = ''): Promise<EvalScore> {

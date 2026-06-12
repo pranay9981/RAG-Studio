@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import type { CompareResult, ArchInfo } from '@/lib/types'
-import { Loader2, Maximize2, X, Zap } from 'lucide-react'
+import { Loader2, Maximize2, X } from 'lucide-react'
 import MarkdownContent from './MarkdownContent'
 import EvalScorecard from './EvalScorecard'
 
@@ -77,8 +77,6 @@ export default function CompareGrid({ results, architectures, loading }: Props) 
         {results.map(r => {
           const info = archMap[r.arch_key]
           const archLabel = r.arch_key.split(' ').slice(1).join(' ')
-          const isCached = r.elapsed < 0.05
-
           return (
             <div key={r.arch_key}
               className="bg-surface border border-white/[0.07] rounded-2xl flex flex-col animate-slide-up overflow-hidden hover:border-white/[0.12] transition-all group shadow-card"
@@ -90,7 +88,6 @@ export default function CompareGrid({ results, architectures, loading }: Props) 
                 </div>
                 <span className="text-xs font-semibold text-slate-200 truncate flex-1">{archLabel}</span>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
-                  {isCached && <Zap size={9} className="text-amber-400" />}
                   <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${r.error ? 'text-red-400 bg-red-400/10' : 'text-slate-500 bg-white/[0.04]'}`}>
                     {r.error ? 'ERR' : `${r.elapsed.toFixed(2)}s`}
                   </span>

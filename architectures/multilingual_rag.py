@@ -54,8 +54,9 @@ class MultilingualRAGPipeline:
             if "dimension" in str(e).lower():
                 # Stale collection with wrong embedding dim — recreate and retry
                 print(f"[multilingual_rag] Dimension mismatch on add — recreating collection and retrying")
-                services.chroma_client.delete_collection(self.collection_name)
-                self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+                with services._chroma_lock:
+                    services.chroma_client.delete_collection(self.collection_name)
+                    self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
                 with services._chroma_lock:
                     self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
             else:
@@ -84,6 +85,9 @@ class MultilingualRAGPipeline:
         docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
         metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
 
+        # Build text→meta map before reranking so positional alignment is preserved
+        doc_meta_map = {text: meta for text, meta in zip(docs, metas)}
+
         step("Re-ranking with cross-encoder…")
         scored = services.rerank(query, docs, top_n=4)
         reranked_texts = [text for _, text in scored]
@@ -106,7 +110,7 @@ class MultilingualRAGPipeline:
                 metas = metas + [{}] * len(web)
 
         # Build unified lookup BEFORE boost (covers both ChromaDB + web results)
-        combined_meta_map = {text: meta for text, meta in zip(reranked_texts, metas)}
+        combined_meta_map = {text: doc_meta_map.get(text, {}) for text in reranked_texts}
 
         # Feedback boost — surface positively-rated chunks, demote negatives
         dummy_metas = [{} for _ in reranked_texts]

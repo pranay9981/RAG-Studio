@@ -1,4 +1,5 @@
 import os
+import threading
 import networkx as nx
 import json
 import uuid
@@ -12,6 +13,7 @@ class GraphRAGPipeline:
     def __init__(self):
         self.arch_key = "02 Graph RAG (Knowledge Graphs)"
         self.graph = nx.Graph()
+        self._graph_lock = threading.Lock()
         self.collection_name = "graph_rag_collection"
         try:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
@@ -33,16 +35,16 @@ class GraphRAGPipeline:
     def _save_graph(self):
         try:
             os.makedirs(os.path.dirname(self._graph_path), exist_ok=True)
-            data = {
-                "nodes": list(self.graph.nodes()),
-                "edges": [
+            with self._graph_lock:
+                nodes_snapshot = list(self.graph.nodes())
+                edges_snapshot = [
                     {"source": u, "target": v, "relationship": d.get("relationship", "")}
                     for u, v, d in self.graph.edges(data=True)
-                ],
-            }
+                ]
+            data = {"nodes": nodes_snapshot, "edges": edges_snapshot}
             with open(self._graph_path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
-            print(f"[graph_rag] Saved {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
+            print(f"[graph_rag] Saved {len(nodes_snapshot)} nodes, {len(edges_snapshot)} edges")
         except Exception as e:
             print(f"[graph_rag] Failed to save graph: {e}")
 
@@ -52,25 +54,28 @@ class GraphRAGPipeline:
         try:
             with open(self._graph_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.graph.clear()
-            for node in data.get("nodes", []):
-                self.graph.add_node(node)
-            for edge in data.get("edges", []):
-                self.graph.add_edge(
-                    edge["source"], edge["target"],
-                    relationship=edge.get("relationship", ""),
-                )
+            with self._graph_lock:
+                self.graph.clear()
+                for node in data.get("nodes", []):
+                    self.graph.add_node(node)
+                for edge in data.get("edges", []):
+                    self.graph.add_edge(
+                        edge["source"], edge["target"],
+                        relationship=edge.get("relationship", ""),
+                    )
             print(f"[graph_rag] Loaded {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges from disk")
         except Exception as e:
             print(f"[graph_rag] Failed to load graph: {e}")
 
     def reset(self):
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
-        self.graph.clear()
+        with services._chroma_lock:
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        with self._graph_lock:
+            self.graph.clear()
         try:
             if os.path.exists(self._graph_path):
                 os.remove(self._graph_path)
@@ -119,13 +124,14 @@ Text:
 
         for doc in documents:
             triples = self._extract_entities_and_relationships(doc.page_content)
-            for triple in triples:
-                if all(k in triple for k in ("source", "target", "relationship")):
-                    self.graph.add_edge(
-                        triple["source"],
-                        triple["target"],
-                        relationship=triple["relationship"],
-                    )
+            with self._graph_lock:
+                for triple in triples:
+                    if all(k in triple for k in ("source", "target", "relationship")):
+                        self.graph.add_edge(
+                            triple["source"],
+                            triple["target"],
+                            relationship=triple["relationship"],
+                        )
         self._save_graph()
 
     def _extract_query_entities(self, query: str) -> List[str]:
@@ -143,7 +149,12 @@ Query: {query}"""
         from pyvis.network import Network
         import tempfile, os
 
-        if not self.graph.nodes():
+        with self._graph_lock:
+            graph_nodes_list = list(self.graph.nodes())
+            graph_degrees = {n: self.graph.degree(n) for n in graph_nodes_list}
+            graph_edges_list = list(self.graph.edges(data=True))
+
+        if not graph_nodes_list:
             return ""
 
         net = Network(
@@ -166,12 +177,12 @@ Query: {query}"""
         """)
 
         sorted_nodes = sorted(
-            self.graph.nodes(), key=lambda n: self.graph.degree(n), reverse=True
+            graph_nodes_list, key=lambda n: graph_degrees.get(n, 0), reverse=True
         )
         nodes_to_show = set(sorted_nodes[:max_nodes])
 
         for node in nodes_to_show:
-            degree = self.graph.degree(node)
+            degree = graph_degrees.get(node, 0)
             size = max(12, min(40, 12 + degree * 4))
             color = "#4a9eff" if degree > 2 else "#a0c4ff"
             net.add_node(
@@ -179,7 +190,7 @@ Query: {query}"""
                 title=f"{node}\n{degree} connection(s)", size=size, color=color,
             )
 
-        for u, v, data in self.graph.edges(data=True):
+        for u, v, data in graph_edges_list:
             if u in nodes_to_show and v in nodes_to_show:
                 rel = data.get("relationship", "")
                 net.add_edge(str(u), str(v), label=rel, title=rel, arrows="to")
@@ -204,12 +215,21 @@ Query: {query}"""
         query_entities = self._extract_query_entities(query)
 
         step("Searching knowledge graph for matching nodes…")
+        with self._graph_lock:
+            graph_nodes = list(self.graph.nodes())
+            graph_neighbors = {
+                node: {
+                    nbr: dict(self.graph[node][nbr])
+                    for nbr in self.graph.neighbors(node)
+                }
+                for node in graph_nodes
+            }
         subgraph_lines = []
         for entity in query_entities:
-            for node in self.graph.nodes():
+            for node in graph_nodes:
                 if entity.lower() in str(node).lower():
-                    for neighbor in self.graph.neighbors(node):
-                        rel = self.graph[node][neighbor].get("relationship", "associated with")
+                    for neighbor, edge_data in graph_neighbors.get(node, {}).items():
+                        rel = edge_data.get("relationship", "associated with")
                         subgraph_lines.append(f"{node} --[{rel}]--> {neighbor}")
         graph_text = "\n".join(set(subgraph_lines))
 

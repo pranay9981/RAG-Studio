@@ -144,11 +144,11 @@ export default function DocumentManager({ archKeys, onIngested, docLibrary, onDo
       {uniqueDocs.length > 0 && (
         <div className="space-y-1 pt-1">
           <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest px-1">Ingested</p>
-          {uniqueDocs.map((d, i) => {
+          {uniqueDocs.map((d) => {
             const label = d.name.split('/').pop()?.split('\\').pop() || d.name
             const isDeleting = deletingSource === d.name
             return (
-              <div key={i} className="flex items-center gap-2 group px-2 py-1.5 rounded-xl hover:bg-white/[0.03] transition-colors">
+              <div key={d.name} className="flex items-center gap-2 group px-2 py-1.5 rounded-xl hover:bg-white/[0.03] transition-colors">
                 <div className="w-5 h-5 rounded-lg bg-violet-500/10 border border-violet-500/15 flex items-center justify-center flex-shrink-0">
                   <FileText size={9} className="text-violet-400" />
                 </div>

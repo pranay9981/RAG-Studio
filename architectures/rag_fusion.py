@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import List, Dict
 from langchain_core.documents import Document
@@ -20,11 +21,12 @@ class RAGFusionPipeline:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def reset(self):
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        with services._chroma_lock:
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def ingest(self, documents: List[Document]):
         if not documents:
@@ -51,7 +53,7 @@ Original query: {query}
 {n} query variations:"""
         response = services.llm.invoke(prompt)
         text = services.extract_response_text(response)
-        queries = [q.strip().lstrip("-•123456789. ") for q in text.strip().split("\n") if q.strip()]
+        queries = [re.sub(r'^[\d\-•.]+\s*', '', q.strip()) for q in text.strip().split("\n") if q.strip()]
         queries = [q for q in queries if len(q) > 5]
         return queries[:n] if queries else [query]
 

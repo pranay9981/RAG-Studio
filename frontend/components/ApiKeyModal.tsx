@@ -97,8 +97,7 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
           <div className="flex items-start gap-2 bg-white/[0.03] border border-white/[0.06] rounded-xl px-3 py-2.5">
             <AlertCircle size={12} className="text-slate-500 mt-0.5 flex-shrink-0" />
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              The key is stored in the server process memory only — it is never sent
-              anywhere other than Groq's API. Restart the server and re-enter to change it.
+              The key is saved to the server's .env file and persists across restarts. It is only sent to Groq's API.
             </p>
           </div>
 

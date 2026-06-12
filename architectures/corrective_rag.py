@@ -34,11 +34,12 @@ class CorrectiveRAGPipeline:
         return getattr(self._local, 'on_step', None)
 
     def reset(self):
-        try:
-            services.chroma_client.delete_collection(self.collection_name)
-        except Exception:
-            pass
-        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+        with services._chroma_lock:
+            try:
+                services.chroma_client.delete_collection(self.collection_name)
+            except Exception:
+                pass
+            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
 
     def ingest(self, documents: List[Document]):
         if not documents:
@@ -52,10 +53,11 @@ class CorrectiveRAGPipeline:
 
     def retrieve_node(self, state: CRAGState) -> Dict:
         query = state["query"]
-        if not self.collection.count():
+        count = self.collection.count()
+        if not count:
             return {"documents": []}
         query_embedding = services.embeddings.embed_query(query)
-        n = min(4, self.collection.count())
+        n = min(4, count)
         results, self.collection = services.chroma_query(
             self.collection, self.collection_name,
             query_embeddings=[query_embedding], n_results=n, include=["documents", "metadatas"],
@@ -102,6 +104,8 @@ Output ONLY the rewritten query."""
         return {"documents": state["documents"] + web_docs}
 
     def generate_node(self, state: CRAGState) -> Dict:
+        if not state.get("documents"):
+            return {"answer": "No context available. Please ingest a document or check your API key."}
         if self._on_step:
             self._on_step(("step", "Generating with Llama 4 Scout…"))
         # Truncate each doc and cap total to avoid Groq context window overflow

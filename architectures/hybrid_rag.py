@@ -46,11 +46,12 @@ class HybridRAGPipeline:
 
     def reset(self):
         with self._ingest_lock:
-            try:
-                services.chroma_client.delete_collection(self.collection_name)
-            except Exception:
-                pass
-            self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+            with services._chroma_lock:
+                try:
+                    services.chroma_client.delete_collection(self.collection_name)
+                except Exception:
+                    pass
+                self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
             self.bm25 = None
             self.chunks = []
             self.chunk_ids = []
@@ -63,9 +64,6 @@ class HybridRAGPipeline:
             start = len(self.chunk_ids)
             new_ids = [f"hybrid_{uuid.uuid4().hex[:8]}_{start + i}" for i in range(len(documents))]
 
-            self.chunks.extend(documents)
-            self.chunk_ids.extend(new_ids)
-
             texts = [doc.page_content for doc in documents]
             metadatas = [doc.metadata for doc in documents]
             embeddings = services.embeddings.embed_documents(texts)
@@ -77,6 +75,9 @@ class HybridRAGPipeline:
                     metadatas=metadatas,
                     ids=new_ids,
                 )
+
+            self.chunks.extend(documents)
+            self.chunk_ids.extend(new_ids)
 
             tokenized_corpus = [doc.page_content.lower().split() for doc in self.chunks]
             self.bm25 = BM25Okapi(tokenized_corpus)
@@ -168,25 +169,26 @@ class HybridRAGPipeline:
                 reranked_texts = reranked_texts + web
 
         window_map = {c["text"]: c.get("window_text") for c in candidates}
-        if on_step:
-            sources = [
-                {
-                    "text": text[:300],
-                    "source": next(
-                        (c.get("source", "Unknown") for c in candidates if c["text"] == text),
-                        "Unknown",
-                    ),
-                    "score": round(score, 3),
-                }
-                for score, text in scored
-            ]
-            on_step(("sources", sources))
-
         meta_list = [
             {"source": next((c.get("source") for c in candidates if c["text"] == t), "Unknown"),
              "parent_text": window_map.get(t)}
             for t in reranked_texts
         ]
+
+        if on_step:
+            sources = [
+                {
+                    "text": t[:300],
+                    "source": m.get("source", "Unknown"),
+                    "score": round(
+                        next((score for score, text in scored if text == t), 0.0),
+                        3,
+                    ),
+                }
+                for t, m in zip(reranked_texts, meta_list)
+            ]
+            on_step(("sources", sources))
+
         context = services.build_sourced_context(reranked_texts, meta_list)
 
         step("Generating with Llama 4 Scout…")

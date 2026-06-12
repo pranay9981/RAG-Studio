@@ -2,6 +2,7 @@ import uuid
 import json
 import re
 import ast as _ast
+import threading
 from typing import List
 from langchain_core.documents import Document
 from core.shared_services import services
@@ -20,9 +21,9 @@ _ALLOWED_AST_NODES = frozenset({
 _ALLOWED_ATTRS = frozenset({
     'head', 'tail', 'describe', 'shape', 'dtypes', 'columns', 'index',
     'values', 'sum', 'mean', 'median', 'std', 'min', 'max', 'count',
-    'groupby', 'sort_values', 'filter', 'loc', 'iloc', 'query',
-    'to_dict', 'to_csv', 'to_string', 'reset_index', 'drop', 'rename',
-    'merge', 'join', 'agg', 'apply', 'str', 'dt', 'cat',
+    'groupby', 'sort_values', 'filter', 'loc', 'iloc',
+    'to_dict', 'to_string', 'reset_index', 'drop', 'rename',
+    'merge', 'join', 'agg', 'str', 'dt', 'cat',
     'size', 'unique', 'nunique', 'value_counts', 'idxmax', 'idxmin',
     'nlargest', 'nsmallest', 'cumsum', 'cumprod', 'diff', 'fillna',
     'dropna', 'isna', 'notna', 'astype', 'copy', 'items', 'iterrows',
@@ -57,6 +58,7 @@ class StructuredRAGPipeline:
         self.arch_key = "09 Structured RAG (CSV/Excel)"
         self.collection_name = "structured_rag_collection"
         self._table_store: dict = {}
+        self._table_lock = threading.Lock()
         try:
             self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
         except Exception as e:
@@ -106,13 +108,14 @@ class StructuredRAGPipeline:
         with services._chroma_lock:
             self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
-        for doc in documents:
-            if doc.metadata.get("type") in ("csv", "excel"):
-                source = doc.metadata.get("source", "unknown")
-                self._table_store[source] = {
-                    "columns": json.loads(doc.metadata.get("columns", "[]")),
-                    "csv_text": doc.page_content,
-                }
+        with self._table_lock:
+            for doc in documents:
+                if doc.metadata.get("type") in ("csv", "excel"):
+                    source = doc.metadata.get("source", "unknown")
+                    self._table_store[source] = {
+                        "columns": json.loads(doc.metadata.get("columns", "[]")),
+                        "csv_text": doc.page_content,
+                    }
 
     def _run_pandas_query(self, csv_text: str, columns: list, query: str) -> str | None:
         prompt = f"""You are a data analyst. Given a CSV table, write Python/pandas code to answer the query.
@@ -159,10 +162,12 @@ Examples: df['sales'].sum()  |  df[df['region']=='North']['revenue'].mean()  |  
             return "Please ingest a CSV, Excel, or text document first!"
 
         structured_result = None
-        if self._table_store:
+        with self._table_lock:
+            table_snapshot = dict(self._table_store)
+        if table_snapshot:
             step("Attempting structured query (Text-to-Pandas)…")
             all_results = []
-            for source, table in self._table_store.items():
+            for source, table in table_snapshot.items():
                 result = self._run_pandas_query(table["csv_text"], table["columns"], query)
                 if result:
                     label = source.split("/")[-1].split("\\")[-1]

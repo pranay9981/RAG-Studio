@@ -97,7 +97,7 @@ export default function AnalyticsDashboard({ data, onClose }: Props) {
                           <td className="py-2.5 pr-4">
                             <span className="flex items-center gap-1 text-slate-400">
                               <Clock size={10} />
-                              {d.avg_elapsed}s
+                              {d.avg_elapsed.toFixed(2)}s
                             </span>
                           </td>
                           <td className="py-2.5 pr-4 w-24"><Bar value={d.avg_faithfulness} color="bg-green-500" /></td>
@@ -132,7 +132,7 @@ export default function AnalyticsDashboard({ data, onClose }: Props) {
                   <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wider mb-3">Recent Queries</p>
                   <div className="space-y-1.5">
                     {data.recent.map((r, i) => (
-                      <div key={i} className="flex items-center gap-3 text-xs px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                      <div key={`${r.arch_key}-${r.ts}-${i}`} className="flex items-center gap-3 text-xs px-3 py-2 rounded-lg bg-white/[0.02] border border-white/[0.04]">
                         <span className="text-slate-500 flex-shrink-0 w-20 truncate">{ARCH_LABELS[r.arch_key] || r.arch_key.slice(0, 10)}</span>
                         <span className="flex-1 text-slate-300 truncate">{r.query}</span>
                         <span className="text-slate-600 flex-shrink-0 font-mono">{r.elapsed.toFixed(1)}s</span>
