@@ -452,6 +452,30 @@ async def query_stream(
 
 @app.post("/api/compare")
 async def compare(request: CompareRequest):
+    # Pre-warm HNSW readers for all collections sequentially BEFORE spawning threads.
+    # ChromaDB 1.x lazily initializes HNSW readers on first collection.query(); when
+    # 10 threads hit different collections simultaneously, ChromaDB's internal SegmentManager
+    # races during reader creation even with our _chroma_lock. Running a dummy query on
+    # each collection here forces sequential initialization so threads see warm readers.
+    _dummy_384 = [0.0] * 384   # MiniLM-L6-v2 dim
+    _dummy_1024 = [0.0] * 1024  # BGE-M3 dim (multilingual)
+    for _arch_key in ARCH_KEYS:
+        _state_key = STATE_KEY_MAP[_arch_key]
+        _pipeline = session.get_pipeline(_state_key)
+        if _pipeline and hasattr(_pipeline, 'collection'):
+            try:
+                with services._chroma_lock:
+                    _count = _pipeline.collection.count()
+                if _count > 0:
+                    _emb = _dummy_1024 if _state_key == "multilingual_pipeline" else _dummy_384
+                    services.chroma_query(
+                        _pipeline.collection,
+                        getattr(_pipeline, 'collection_name', _state_key),
+                        query_embeddings=[_emb], n_results=1, include=["ids"],
+                    )
+            except Exception:
+                pass  # warm-up failure is non-fatal — real queries will retry
+
     result_list = [None] * len(ARCH_KEYS)
 
     def run_one(i: int, arch_key: str, state_key: str):
