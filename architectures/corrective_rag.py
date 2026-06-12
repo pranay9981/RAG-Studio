@@ -143,7 +143,6 @@ Answer:"""
             {
                 "generate_node": "generate_node",
                 "rewrite_node": "rewrite_node",
-                "web_search_node": "web_search_node",
             },
         )
         workflow.add_edge("rewrite_node", "web_search_node")

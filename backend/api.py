@@ -8,6 +8,7 @@ import socket
 import tempfile
 import threading
 import urllib.request
+import urllib.error
 from queue import Queue, Empty
 from typing import Optional, List
 
@@ -21,6 +22,17 @@ from core.shared_services import services
 from core.adaptive_db import adaptive_db
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
+
+# Block HTTP redirects in SSRF-protected URL fetches
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            req.full_url, code,
+            f"Redirect blocked: server redirected to {newurl}",
+            headers, fp,
+        )
+
+_ssrf_opener = urllib.request.build_opener(_NoRedirectHandler)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
@@ -92,7 +104,7 @@ def fetch_url_text(url: str) -> str:
     except socket.gaierror as e:
         raise HTTPException(status_code=400, detail=f"DNS resolution failed: {e}")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with _ssrf_opener.open(req, timeout=15) as resp:
         html = resp.read().decode("utf-8", errors="replace")
     html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
     html = re.sub(r"<style[^>]*>.*?</style>",   "", html, flags=re.DOTALL | re.IGNORECASE)
@@ -688,7 +700,7 @@ async def delete_document(request: DeleteDocumentRequest):
     for arch_key, state_key in STATE_KEY_MAP.items():
         p = session.get_pipeline(state_key)
         if p and hasattr(p, "collection") and p.collection.count() == 0:
-            session.ingested_archs.discard(arch_key)
+            session.remove_ingested_arch(arch_key)
 
     if total_deleted > 0:
         adaptive_db.clear_cache()

@@ -11,7 +11,7 @@ const PIPELINE_STEPS: Record<string, string[]> = {
   '01 Hybrid RAG (Dense + Sparse)': ['Embed Query', 'Dense Retrieval', 'BM25 Retrieval', 'RRF Fusion (k=60)', 'Cross-Encoder Rerank', 'Context Eval', 'Llama 4 Scout Generate'],
   '02 Graph RAG (Knowledge Graphs)': ['Extract Entities', 'Graph Traversal', 'Dense Retrieval', 'Context Eval', 'Combine Context', 'Llama 4 Scout Generate'],
   '03 Agentic RAG (LangGraph)': ['Planner Agent', 'Route Decision', 'Vector / Web / Direct', 'Multi-hop Decompose', 'Reasoner Agent', 'Llama 4 Scout Generate'],
-  '04 Corrective RAG (CRAG)': ['Retrieve', 'Evaluate Quality', 'CORRECT → Generate', 'AMBIGUOUS → Rewrite + Web', 'INCORRECT → Web Search', 'Llama 4 Scout Generate'],
+  '04 Corrective RAG (CRAG)': ['Retrieve', 'Evaluate Quality', 'CORRECT → Generate', 'AMBIGUOUS → Generate (local docs)', 'INCORRECT → Rewrite Query', 'INCORRECT → Web Search', 'Llama 4 Scout Generate'],
   '05 Multimodal RAG (Vision + Text)': ['Embed Query', 'Retrieve Text + Images', 'Build Multimodal Prompt', 'Llama 4 Scout Vision Generate'],
   '06 Multilingual RAG (BGE-M3)': ['BGE-M3 Cross-lingual Embed', 'Cross-lingual Retrieval', 'Cross-Encoder Rerank', 'Context Eval', 'Llama 4 Scout Generate (same language)'],
   '07 RAG-Fusion (Query Expansion)': ['Generate 4 Sub-queries', 'Retrieve for Each (×4)', 'RRF Fusion', 'Context Eval', 'Llama 4 Scout Generate'],

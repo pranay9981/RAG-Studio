@@ -154,6 +154,10 @@ class GlobalSession:
         with self._lock:
             self.ingested_archs.add(arch_key)
 
+    def remove_ingested_arch(self, arch_key: str):
+        with self._lock:
+            self.ingested_archs.discard(arch_key)
+
     def append_doc(self, doc: dict):
         with self._lock:
             self.doc_library.append(doc)

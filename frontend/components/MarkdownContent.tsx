@@ -25,7 +25,7 @@ function renderInline(text: string, prefix: string): React.ReactNode {
 }
 
 export default function MarkdownContent({ content, className }: { content: string; className?: string }) {
-  const lines = content.split('\n')
+  const lines = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   const nodes: React.ReactNode[] = []
   let i = 0, k = 0
   const nextKey = () => String(k++)

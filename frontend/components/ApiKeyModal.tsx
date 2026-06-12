@@ -26,8 +26,8 @@ export default function ApiKeyModal({ onClose, onKeySet }: Props) {
         onKeySet()
         onClose()
       }, 700)
-    } catch (e: any) {
-      setError(e.message || 'Failed to set API key')
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to set API key')
     } finally {
       setLoading(false)
     }
