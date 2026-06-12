@@ -458,7 +458,7 @@ async def compare(request: CompareRequest):
         pipeline = session.get_pipeline(state_key)
         start = time.time()
 
-        for attempt in range(2):
+        for attempt in range(3):
             captured_sources: list = []
 
             def capture_step(event):
@@ -477,10 +477,10 @@ async def compare(request: CompareRequest):
                 return
             except Exception as e:
                 err = str(e)
-                # Retry once on HNSW segment reader errors (transient concurrency issue)
-                if attempt == 0 and ("hnsw" in err.lower() or "Nothing found on disk" in err):
-                    print(f"[compare] HNSW error for {arch_key}, retrying… ({err[:80]})")
-                    time.sleep(0.3)
+                # Retry on HNSW segment reader errors (transient concurrency issue)
+                if attempt < 2 and ("hnsw" in err.lower() or "nothing found on disk" in err.lower()):
+                    print(f"[compare] HNSW error for {arch_key} (attempt {attempt+1}), retrying… ({err[:80]})")
+                    time.sleep(0.5 * (attempt + 1))
                     continue
                 result_list[i] = {
                     "arch_key": arch_key,

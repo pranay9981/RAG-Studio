@@ -255,29 +255,64 @@ export default function Page() {
   }, [])
 
   const handleExportCurrentChat = useCallback(() => {
-    if (!currentMessages.length) return
-    const title = compareMode ? 'Compare Mode' : selectedArch
-    const md = `# RAG Studio — ${title}\n\n` +
-      currentMessages
-        .map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
-        .join('\n\n---\n\n')
-    downloadMd(md, `rag-${title.slice(0, 20).replace(/\s+/g, '-').toLowerCase()}`)
-  }, [currentMessages, compareMode, selectedArch])
+    if (compareMode) {
+      if (!currentCompareResults.length) return
+      const compareMsgs = allMessages[COMPARE_KEY] ?? []
+      const lastUserMsg = [...compareMsgs].reverse().find(m => m.role === 'user')
+      const query = lastUserMsg?.content ?? 'Query'
+      const md = `# RAG Studio — Compare Mode\n\n**Query:** ${query}\n\n` +
+        currentCompareResults.map(r => {
+          const evalStr = r.eval
+            ? `\n\n**Eval:** Faithful ${r.eval.faithfulness}/10 · Relevant ${r.eval.relevance}/10 · Precision ${r.eval.context_precision}/10 · Recall ${r.eval.context_recall}/10`
+            : ''
+          const errStr = r.error ? `\n\n⚠️ Error: ${r.error}` : ''
+          return `## ${r.arch_key}\n\n*${r.elapsed}s*\n\n${r.answer || '(no answer)'}${evalStr}${errStr}`
+        }).join('\n\n---\n\n')
+      downloadMd(md, 'rag-compare-mode')
+    } else {
+      if (!currentMessages.length) return
+      const title = selectedArch
+      const md = `# RAG Studio — ${title}\n\n` +
+        currentMessages
+          .map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
+          .join('\n\n---\n\n')
+      downloadMd(md, `rag-${title.slice(0, 20).replace(/\s+/g, '-').toLowerCase()}`)
+    }
+  }, [currentMessages, currentCompareResults, compareMode, selectedArch, allMessages])
 
   const handleExportAllChats = useCallback(() => {
     const sections: string[] = []
     for (const [key, msgs] of Object.entries(allMessages)) {
+      if (key === COMPARE_KEY) {
+        const compareResults = allCompareResults[COMPARE_KEY] ?? []
+        const lastUserMsg = [...msgs].reverse().find(m => m.role === 'user')
+        const query = lastUserMsg?.content ?? ''
+        if (compareResults.length) {
+          sections.push(
+            `# Compare Mode\n\n**Query:** ${query}\n\n` +
+            compareResults.map(r => {
+              const evalStr = r.eval
+                ? `\n\n**Eval:** Faithful ${r.eval.faithfulness}/10 · Relevant ${r.eval.relevance}/10 · Precision ${r.eval.context_precision}/10 · Recall ${r.eval.context_recall}/10`
+                : ''
+              const errStr = r.error ? `\n\n⚠️ Error: ${r.error}` : ''
+              return `## ${r.arch_key}\n\n*${r.elapsed}s*\n\n${r.answer || '(no answer)'}${evalStr}${errStr}`
+            }).join('\n\n---\n\n')
+          )
+        } else if (query) {
+          sections.push(`# Compare Mode\n\n**You:**\n${query}`)
+        }
+        continue
+      }
       if (!msgs.length) continue
-      const title = key === COMPARE_KEY ? 'Compare Mode' : key
       sections.push(
-        `# ${title}\n\n` +
+        `# ${key}\n\n` +
         msgs.map(m => `**${m.role === 'user' ? 'You' : m.arch || 'Assistant'}:**\n${m.content}`)
           .join('\n\n---\n\n')
       )
     }
     if (!sections.length) return
     downloadMd(sections.join('\n\n\n---\n\n\n'), 'rag-all-chats')
-  }, [allMessages])
+  }, [allMessages, allCompareResults])
 
   const handleExportCompare = useCallback(() => {
     if (!currentCompareResults.length) return

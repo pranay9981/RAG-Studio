@@ -47,10 +47,13 @@ class AgenticRAGPipeline:
         ids = [f"agentic_{uuid.uuid4().hex}" for _ in range(len(documents))]
         metadatas = [doc.metadata for doc in documents]
         embeddings = services.embeddings.embed_documents(texts)
-        self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
+        with services._chroma_lock:
+            self.collection.add(documents=texts, embeddings=embeddings, metadatas=metadatas, ids=ids)
 
     def _vector_search(self, query: str) -> tuple:
-        if not self.collection.count():
+        with services._chroma_lock:
+            n_docs = self.collection.count()
+        if not n_docs:
             return "No documents have been ingested yet.", []
         query_embedding = services.embeddings.embed_query(query)
         n = min(4, self.collection.count())
@@ -96,7 +99,8 @@ Questions:"""
 
     def planner_node(self, state: AgentState) -> Dict:
         last_msg = state["messages"][-1].content
-        has_docs = self.collection.count() > 0
+        with services._chroma_lock:
+            has_docs = self.collection.count() > 0
 
         if has_docs:
             # Documents available — always retrieve; only choose between vector and web
@@ -258,6 +262,9 @@ Answer directly and comprehensively:"""
             return f"**Agent Trace:**\n{trace_str}\n\n---\n\n{final_answer}"
 
         except Exception as e:
-            return f"Agent pipeline failed: {str(e)}"
+            err = str(e)
+            if "hnsw" in err.lower() or "nothing found on disk" in err.lower():
+                raise  # let compare retry handle transient HNSW errors
+            return f"Agent pipeline failed: {err}"
         finally:
             self._local.on_step = None
