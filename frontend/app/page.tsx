@@ -14,7 +14,7 @@ import ArchExplainer from '@/components/ArchExplainer'
 import {
   getArchitectures, streamQuery, compareAll, evaluateAnswer,
   resetSession, getGraphHtml, submitFeedback, getAnalytics, getConfigStatus,
-  listDocuments, getHistory, clearCache,
+  listDocuments, getHistory, clearCache, getHealth,
 } from '@/lib/api'
 import type { ArchInfo, ChatMessage as Msg, Source, EvalScore, DocItem, HistoryItem, CompareResult, AnalyticsData } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
@@ -57,6 +57,7 @@ export default function Page() {
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null)
   const [showExplainer, setShowExplainer] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [bgeM3Loaded, setBgeM3Loaded] = useState(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -83,6 +84,15 @@ export default function Page() {
     })
     getConfigStatus().then(({ has_key }) => { if (!has_key) setShowApiKey(true) }).catch(() => {})
     getHistory().then(h => { if (h.length) setHistory(h) })
+    // Poll BGE-M3 load status every 5 s until loaded
+    getHealth().then(h => setBgeM3Loaded(h.bge_m3_loaded))
+    const bgeInterval = setInterval(() => {
+      getHealth().then(h => {
+        setBgeM3Loaded(h.bge_m3_loaded)
+        if (h.bge_m3_loaded) clearInterval(bgeInterval)
+      })
+    }, 5000)
+    return () => clearInterval(bgeInterval)
   }, [])
 
   // Session persistence — restore messages from localStorage
@@ -369,6 +379,7 @@ export default function Page() {
         onClearCache={handleClearCache}
         onAnalytics={handleOpenAnalytics}
         onSettings={() => setShowApiKey(true)}
+        bgeM3Loaded={bgeM3Loaded}
       >
         <DocumentManager
           archKeys={archs.map(a => a.key)}

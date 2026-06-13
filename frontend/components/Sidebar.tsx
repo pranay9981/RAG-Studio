@@ -14,6 +14,7 @@ interface Props {
   messageCounts: Record<string, number>
   docLibrary: DocItem[]
   history: HistoryItem[]
+  bgeM3Loaded?: boolean
   onSelectArch: (k: string) => void
   onCompareToggle: () => void
   onEvalToggle: () => void
@@ -28,7 +29,7 @@ interface Props {
 
 export default function Sidebar({
   architectures, selectedArch, compareMode, enableEval, ingestedArchs,
-  messageCounts, docLibrary, history,
+  messageCounts, docLibrary, history, bgeM3Loaded,
   onSelectArch, onCompareToggle, onEvalToggle, onClearChat, onReset,
   exportOptions, onClearCache, onAnalytics, onSettings, children,
 }: Props) {
@@ -95,6 +96,12 @@ export default function Sidebar({
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${active ? 'bg-violet-500/30 text-violet-300' : 'bg-white/[0.06] text-slate-500'}`}>
                         {count}
                       </span>
+                    )}
+                    {a.key.includes('BGE') && !bgeM3Loaded && (
+                      <span
+                        title="BGE-M3 model not loaded yet — will load on first use (~30 s)"
+                        className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0"
+                      />
                     )}
                     {ingested && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />}
                   </div>

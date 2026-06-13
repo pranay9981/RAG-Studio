@@ -173,6 +173,16 @@ export async function listDocuments(archKey: string): Promise<DocItem[]> {
   }
 }
 
+export async function getHealth(): Promise<{ status: string; bge_m3_loaded: boolean }> {
+  try {
+    const r = await fetch(`${BASE}/api/health`)
+    if (!r.ok) return { status: 'error', bge_m3_loaded: false }
+    return r.json()
+  } catch {
+    return { status: 'error', bge_m3_loaded: false }
+  }
+}
+
 export async function getConfigStatus(): Promise<{ has_key: boolean }> {
   try {
     const r = await fetch(`${BASE}/api/config/status`)

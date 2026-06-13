@@ -234,7 +234,11 @@ def _sanitize_error(err: str) -> str:
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "architectures": len(ARCH_KEYS)}
+    return {
+        "status": "ok",
+        "architectures": len(ARCH_KEYS),
+        "bge_m3_loaded": services._multilingual_embeddings is not None,
+    }
 
 
 @app.get("/api/architectures")

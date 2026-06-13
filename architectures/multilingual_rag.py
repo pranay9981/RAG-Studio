@@ -70,6 +70,8 @@ class MultilingualRAGPipeline:
         if not self.collection.count():
             return "No documents ingested for Multilingual RAG. Please re-ingest your document (requires BGE-M3 model — ensure ~6 GB RAM is free)."
 
+        if services._multilingual_embeddings is None:
+            step("⏳ Loading BGE-M3 model (~570 MB) for the first time — please wait, this takes ~30 s…")
         step("Embedding query with multilingual model…")
         try:
             query_embedding = services.multilingual_embeddings.embed_query(query)
