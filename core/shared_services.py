@@ -33,6 +33,18 @@ class SharedServices:
         if os.environ.get("GROQ_API_KEY", "").strip():
             self._init_llm()
         self._chroma_lock = threading.Lock()
+        # Pre-load BGE-M3 in background so it's ready before first query
+        threading.Thread(target=self._preload_bge_m3, daemon=True, name="bge-m3-preload").start()
+
+    def _preload_bge_m3(self):
+        with self._multilingual_lock:
+            if self._multilingual_embeddings is None:
+                print("[shared_services] Pre-loading BAAI/bge-m3 in background...")
+                try:
+                    self._multilingual_embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
+                    print("[shared_services] BGE-M3 ready.")
+                except Exception as e:
+                    print(f"[shared_services] BGE-M3 pre-load failed: {e}")
 
     def _init_llm(self):
         self._llm = ChatGroq(
