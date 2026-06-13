@@ -16,7 +16,7 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 | 03 | **Agentic RAG** | LangGraph planner routes to VECTOR_SEARCH, WEB_SEARCH, or direct answer; multi-hop decomposition | Queries needing web context or multi-step reasoning |
 | 04 | **Corrective RAG (CRAG)** | Evaluator grades retrieved docs CORRECT / AMBIGUOUS / INCORRECT; rewrites query and falls back to web | When retrieval quality is uncertain |
 | 05 | **Multimodal RAG** | Llama 4 Scout vision summarises uploaded images; base64 stored in metadata; image + text sent at query time | Documents with figures, charts, screenshots |
-| 06 | **Multilingual RAG** | Cross-lingual embedding space; cross-encoder re-ranking; answers in the query's language | Multilingual documents or cross-language queries |
+| 06 | **Multilingual RAG** | BGE-M3 cross-lingual embedding space (1024-dim, pre-loaded on startup); cross-encoder re-ranking; answers in the query's language | Multilingual documents or cross-language queries |
 | 07 | **RAG-Fusion** | Expands query into 4 sub-queries, retrieves separately, merges all ranked lists with RRF | Ambiguous or broad queries |
 | 08 | **HyDE RAG** | Generates a hypothetical ideal answer first, embeds it, uses it as the search vector | Short or keyword-style queries worded differently from source text |
 | 09 | **Structured RAG** | CSV/Excel → pandas DataFrame; LLM generates pandas code from NL query and executes it | Spreadsheets, datasets, numerical analysis, filtering, aggregation |
@@ -54,9 +54,12 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 - **Architecture explainer** — pipeline flow diagram, how-it-works text, best-use cases, and adaptive features per architecture
 
 ### UI
-- **OLED dark theme** — deep black (`#07070f`) base with violet (`#7c3aed`) accent throughout
-- **Glass surface cards** — layered surface tokens, glow shadows, slide-up animations
+- **OLED dark theme** — deep black (`#07070f`) base with violet (`#7c3aed`) accent and emerald active states
+- **Compact sidebar** — all 10 architectures visible at once with no inner scroll; action buttons always pinned at bottom
+- **Rich architecture header** — full-width header with violet gradient wash, layered icon glow, tech-stack pill tags, Active chip, "How it works" and Knowledge Graph controls
+- **Glass surface cards** — layered surface tokens, glow shadows, fade-in animations
 - **Real-time streaming** — bouncing dot animation while the LLM generates; emerald checkmark on completion
+- **BGE-M3 load indicator** — amber pulsing dot on the Multilingual RAG item until the model finishes pre-loading on startup
 - **Horizontal eval score bars** — color-coded fills (green ≥ 7, amber ≥ 4, red < 4) with average badge
 
 ---
@@ -66,11 +69,12 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 | Layer | Choice |
 |---|---|
 | **LLM** | Meta Llama `meta-llama/llama-4-scout-17b-16e-instruct` via `langchain-groq` (vision + text) |
-| **Embeddings** | `all-MiniLM-L6-v2` via `langchain-huggingface` (local, no API key) |
+| **Embeddings (general)** | `all-MiniLM-L6-v2` via `langchain-huggingface` (384-dim, local, no API key) |
+| **Embeddings (multilingual)** | `BAAI/bge-m3` via `sentence-transformers` (1024-dim, pre-loaded on startup in background thread) |
 | **Vector DB** | ChromaDB `PersistentClient` — persists to `./chroma_db` across restarts |
 | **Sparse Search** | `rank-bm25` — BM25Okapi |
 | **Re-ranking** | `cross-encoder/ms-marco-MiniLM-L-6-v2` via `sentence-transformers` |
-| **Knowledge Graph** | NetworkX (in-memory) + PyVis (interactive visualisation) |
+| **Knowledge Graph** | NetworkX (in-memory, serialised to `chroma_db/graph_rag.json`) + PyVis (interactive visualisation) |
 | **Agentic Workflows** | LangGraph — Agentic RAG and CRAG state machines |
 | **Web Search Fallback** | DuckDuckGo (`duckduckgo-search`) — no API key required |
 | **Structured Data** | pandas + openpyxl — CSV/Excel Text-to-Pandas |
@@ -78,7 +82,7 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 | **Document Parsing** | PyPDF2, python-docx, pandas (CSV/Excel), Pillow (images) |
 | **Backend API** | FastAPI + Uvicorn, SSE streaming via `threading.Queue` |
 | **Frontend** | Next.js 14, React 18, Tailwind CSS, TypeScript |
-| **Containerisation** | Docker + Docker Compose (backend + frontend + persistent volume) |
+| **Containerisation** | Docker + Docker Compose (backend + frontend + persistent volumes) |
 | **Python** | 3.11+ |
 
 ---
@@ -86,21 +90,23 @@ Upload PDFs, DOCX, TXT, CSV, Excel, images, or URLs — then ask questions and w
 ## Project Structure
 
 ```
-multiple-rag-system/
+rag-studio/
 │
 ├── requirements.txt
 ├── Dockerfile                      # FastAPI backend Docker image
-├── docker-compose.yml              # backend + frontend + chroma_data volume
+├── docker-compose.yml              # backend + frontend + chroma_data + adaptive_data volumes
 ├── .env                            # GROQ_API_KEY (gitignored)
 ├── .env.example                    # Template — copy to .env and fill in
-├── adaptive.db                     # SQLite — feedback, semantic cache, analytics (auto-created, gitignored)
+├── adaptive_data/
+│   └── adaptive.db                 # SQLite — feedback, semantic cache, analytics (auto-created)
 ├── chroma_db/                      # Persistent ChromaDB vector store (auto-created, gitignored)
+│   └── graph_rag.json              # Graph RAG knowledge graph (serialised on every ingest)
 │
 ├── core/
-│   ├── shared_services.py          # LLM (ChatGroq), embeddings, PersistentChromaDB, reranker,
-│   │                               # parent-child chunking, build_sourced_context,
+│   ├── shared_services.py          # LLM (ChatGroq), embeddings (MiniLM + BGE-M3), PersistentChromaDB,
+│   │                               # reranker, parent-child chunking, build_sourced_context,
 │   │                               # evaluate_context, web_search_fallback,
-│   │                               # chroma_query() — HNSW-safe retry wrapper used by all archs
+│   │                               # chroma_query() — HNSW-safe retry + rebuild wrapper
 │   └── adaptive_db.py              # AdaptiveDB — feedback boost/unmark, semantic cache, analytics
 │
 ├── architectures/
@@ -109,7 +115,7 @@ multiple-rag-system/
 │   ├── agentic_rag.py              # LangGraph: Planner → Tool Executor → Reasoner + multi-hop
 │   ├── corrective_rag.py           # LangGraph: Retrieve → Evaluate → Route → Generate
 │   ├── multimodal_rag.py           # Llama 4 Scout vision + base64 image metadata
-│   ├── multilingual_rag.py         # Cross-lingual embeddings + cross-encoder + feedback boost
+│   ├── multilingual_rag.py         # BGE-M3 cross-lingual embeddings + cross-encoder + feedback boost
 │   ├── rag_fusion.py               # 4 sub-queries + RRF + feedback boost
 │   ├── hyde_rag.py                 # Hypothetical document embeddings + feedback boost
 │   ├── structured_rag.py           # Text-to-Pandas (CSV/Excel) + vector fallback
@@ -118,7 +124,7 @@ multiple-rag-system/
 ├── backend/
 │   ├── __init__.py
 │   ├── session_manager.py          # GlobalSession — initialises all 10 pipelines + ARCH_INFO
-│   └── api.py                      # FastAPI — 18 endpoints, SSE streaming, RAGAS eval
+│   └── api.py                      # FastAPI — 17 endpoints, SSE streaming, RAGAS eval
 │
 ├── legacy/
 │   └── app.py                      # Original Streamlit prototype (reference only)
@@ -128,10 +134,13 @@ multiple-rag-system/
     ├── app/
     │   ├── layout.tsx
     │   ├── page.tsx                # Root — all state, streaming, feedback, analytics, exports
-    │   └── globals.css             # CSS variables, glass utilities, animations
+    │   └── globals.css             # CSS variables, glass utilities, prose styles, animations
     ├── components/
-    │   ├── Sidebar.tsx             # Arch list, toggles, action grid (clear/reset/export/cache/stats/api key)
-    │   ├── ArchCard.tsx            # Architecture info card with expandable how-it-works
+    │   ├── Sidebar.tsx             # Compact arch list (all 10 without scroll), toggles,
+    │   │                           # document manager slot, history, pinned action grid
+    │   ├── ArchCard.tsx            # Full-width architecture header — gradient wash, glow icon,
+    │   │                           # tech-stack tags, Active chip, How it works + Knowledge Graph buttons,
+    │   │                           # expandable How it works / Best for panel
     │   ├── ChatMessage.tsx         # Chat bubbles with thumbs feedback (toggle to unmark) + ⚡ cached badge
     │   ├── MarkdownContent.tsx     # Inline markdown renderer
     │   ├── BrainWorking.tsx        # Live step indicators + bouncing dots + emerald done state
@@ -142,7 +151,7 @@ multiple-rag-system/
     │   ├── CompareGrid.tsx         # 10-card grid with ping-ring loading + expand modal
     │   ├── AnalyticsDashboard.tsx  # Per-arch stats table with bar charts + recent queries
     │   └── ArchExplainer.tsx       # Pipeline flow, how-it-works, adaptive features per arch
-    ├── tailwind.config.ts          # Custom tokens: surface colors, glow shadows, slide-up animation
+    ├── tailwind.config.ts          # Custom tokens: surface colors, glow shadows, animations
     └── lib/
         ├── api.ts                  # All API calls + EventSource streamQuery()
         └── types.ts                # TypeScript interfaces
@@ -161,8 +170,8 @@ multiple-rag-system/
 ### 1 — Clone and install
 
 ```bash
-git clone https://github.com/pranay9981/Multiple-Rag-System.git
-cd Multiple-Rag-System
+git clone https://github.com/pranay9981/RAG-Studio.git
+cd RAG-Studio
 
 python -m venv venv
 
@@ -209,6 +218,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+> **Note:** On first startup the BGE-M3 multilingual model (~570 MB) downloads and loads in a background thread. The Multilingual RAG item in the sidebar shows an amber pulse dot until it's ready — all other architectures are immediately usable.
+
 ### Docker (one command)
 
 ```bash
@@ -216,7 +227,7 @@ cp .env.example .env   # add GROQ_API_KEY to .env first
 docker compose up --build
 ```
 
-Both services start automatically. ChromaDB data persists in a named Docker volume.
+Both services start automatically. ChromaDB and SQLite data persist in named Docker volumes.
 
 ---
 
@@ -232,8 +243,9 @@ Both services start automatically. ChromaDB data persists in a named Docker volu
 8. **Clear Cache** — click "Cache" in the sidebar to wipe the semantic query cache; forces all architectures to re-run their full retrieval pipelines.
 9. **Stats** — click "Stats" in the sidebar to see per-architecture analytics: query counts, latencies, eval scores, cache hits, and feedback ratios.
 10. **How it works** — click "How it works" in the header for a detailed explainer of the current architecture's pipeline.
-11. **Document management** — view and delete ingested files from the sidebar Documents panel.
-12. **API Key** — click the "API Key" button in the sidebar to update your Groq key at any time without restarting the server.
+11. **Knowledge Graph** — when Graph RAG is active and a document has been ingested, click "Knowledge Graph" in the header to explore the extracted entity-relationship graph interactively.
+12. **Document management** — view and delete ingested files from the sidebar Documents panel.
+13. **API Key** — click the "API Key" button in the sidebar to update your Groq key at any time without restarting the server.
 
 ---
 
@@ -241,14 +253,14 @@ Both services start automatically. ChromaDB data persists in a named Docker volu
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Health check |
+| `GET` | `/api/health` | Health check — includes `bge_m3_loaded` flag |
 | `GET` | `/api/architectures` | All 10 architecture metadata |
 | `GET` | `/api/sessions/{id}` | Session info, ingested archs, doc library |
 | `POST` | `/api/ingest` | File or URL ingest with parent-child chunking |
 | `GET` | `/api/query` | SSE stream — `step` / `token` / `sources` / `done` / `error` events |
 | `POST` | `/api/compare` | Run all 10 architectures concurrently (150ms stagger, HNSW-safe) |
 | `POST` | `/api/evaluate` | RAGAS-inspired 4-metric scoring |
-| `POST` | `/api/feedback` | Store rating (1 = up, -1 = down, 0 = unmark/delete) |
+| `POST` | `/api/feedback` | Store rating (1 = up, −1 = down, 0 = unmark/delete) |
 | `GET` | `/api/analytics` | Per-architecture aggregated stats from SQLite |
 | `GET` | `/api/graph` | PyVis HTML for Graph RAG knowledge graph visualisation |
 | `GET` | `/api/history` | Last 20 queries |
@@ -285,7 +297,7 @@ Store in semantic cache + analytics
 
 ### HNSW Concurrency Protection
 
-All 10 architectures use `services.chroma_query()` — a thread-safe wrapper around ChromaDB's `collection.query()` that retries up to 3× on HNSW segment reader failures (common under concurrent compare-mode load), refreshing the collection handle between attempts. Never call `collection.query()` directly in new architectures.
+All 10 architectures use `services.chroma_query()` — a thread-safe wrapper around ChromaDB's `collection.query()` that retries up to 3× on HNSW segment reader failures (common under concurrent compare-mode load), refreshing the collection handle between attempts. If all retries fail it falls back to a full HNSW rebuild by re-embedding stored documents from SQLite. Never call `collection.query()` directly in new architectures.
 
 ---
 
