@@ -105,11 +105,12 @@ class MultimodalRAGPipeline:
             img_path = (meta or {}).get("image_path", "")
             if img_path and os.path.exists(img_path):
                 try:
-                    with open(img_path, "rb") as fh:
-                        b64_data = base64.b64encode(fh.read()).decode("utf-8")
+                    with open(img_path, "r") as fh:
+                        b64_data = fh.read().strip()
+                    mime = (meta or {}).get("image_mime", "image/jpeg")
                     content.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"},
+                        "image_url": {"url": f"data:{mime};base64,{b64_data}"},
                     })
                 except Exception:
                     pass

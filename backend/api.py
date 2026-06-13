@@ -203,10 +203,13 @@ async def process_file(file: UploadFile) -> List[Document]:
             detail=f"Unsupported file type. Supported: PDF, TXT, DOCX, CSV, XLSX, PNG, JPG, JPEG, GIF, WEBP"
         )
 
+    _MIME_MAP = {".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}
+    mime_type = next((v for k, v in _MIME_MAP.items() if name.endswith(k)), "image/jpeg")
+
     b64 = base64.b64encode(content).decode("utf-8")
     msg = HumanMessage(content=[
         {"type": "text", "text": "Describe this image in detail."},
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
     ])
     summary = services.extract_response_text(services.llm.invoke([msg]))
     import uuid as _uuid
@@ -218,8 +221,14 @@ async def process_file(file: UploadFile) -> List[Document]:
         fh.write(b64)
     return [Document(
         page_content=f"Image Description: {summary}",
-        metadata={"source": source, "type": "image", "image_path": img_path},
+        metadata={"source": source, "type": "image", "image_path": img_path, "image_mime": mime_type},
     )]
+
+def _sanitize_error(err: str) -> str:
+    """Convert verbose API errors into user-friendly messages."""
+    if "429" in err or "rate limit" in err.lower() or "tokens per day" in err.lower():
+        return "⚠️ API rate limit reached (Groq free tier: 500K tokens/day). Please wait and try again later, or upgrade your Groq plan."
+    return err
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -366,7 +375,7 @@ async def query_stream(
             elapsed = time.time() - t0
             q.put(("done", {"answer": result, "elapsed": round(elapsed, 3)}))
         except Exception as e:
-            q.put(("error", {"message": str(e)}))
+            q.put(("error", {"message": _sanitize_error(str(e))}))
 
     thread = threading.Thread(target=run_pipeline, daemon=True)
     thread.start()
@@ -534,7 +543,7 @@ async def compare(request: CompareRequest):
                     "answer": "",
                     "elapsed": round(time.time() - start, 3),
                     "sources": [],
-                    "error": err,
+                    "error": _sanitize_error(err),
                 }
                 return
 
