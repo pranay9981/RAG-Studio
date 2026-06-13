@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Loader2, Network, X, HelpCircle } from 'lucide-react'
+import { Send, Loader2, Network, X } from 'lucide-react'
 import ApiKeyModal from '@/components/ApiKeyModal'
 import Sidebar from '@/components/Sidebar'
 import ArchCard from '@/components/ArchCard'
@@ -200,7 +200,6 @@ export default function Page() {
           role: 'assistant',
           content: `Compare failed: ${e instanceof Error ? e.message : 'Unknown error'}`,
           arch: 'Compare All',
-          ts: new Date().toISOString(),
         })
       } finally {
         setCompareLoading(false)
@@ -395,61 +394,76 @@ export default function Page() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         {currentArch && !compareMode && (
-          <div className="flex items-center border-b border-white/[0.06] bg-[#0d0d1a] flex-shrink-0">
-            <ArchCard arch={currentArch} />
-            <div className="flex items-center gap-2.5 flex-shrink-0 px-4">
-              <span className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2.5 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" />
-                Active
-              </span>
-              <button
-                onClick={() => setShowExplainer(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-slate-400 text-xs font-medium hover:bg-white/[0.07] hover:text-slate-200 transition-colors"
-              >
-                <HelpCircle size={12} />
-                How it works
-              </button>
-              {showGraphBtn && (
-                <button
-                  onClick={handleOpenGraph}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/25 text-violet-300 text-xs font-medium hover:bg-violet-500/20 transition-colors"
-                >
-                  <Network size={13} />
-                  Knowledge Graph
-                </button>
-              )}
-            </div>
-          </div>
+          <ArchCard
+            arch={currentArch}
+            onExplainerOpen={() => setShowExplainer(true)}
+            showGraphBtn={showGraphBtn}
+            onGraphOpen={handleOpenGraph}
+          />
         )}
         {compareMode && (
-          <div className="px-6 py-3 border-b border-white/[0.06] bg-violet-500/[0.06] flex items-center gap-3">
-            <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse-slow" />
-            <span className="text-xs font-semibold text-violet-300">Compare Mode</span>
-            <span className="text-xs text-slate-500">— all {archs.length} architectures run simultaneously</span>
+          <div className="flex-shrink-0 flex items-center gap-3 px-6 py-3.5"
+            style={{
+              background: 'linear-gradient(90deg, rgba(124,58,237,0.07) 0%, transparent 100%)',
+              borderBottom: '1px solid rgba(124,58,237,0.15)',
+              borderTop: '1px solid rgba(124,58,237,0.06)',
+            }}>
+            <div className="w-2 h-2 rounded-full animate-pulse-slow flex-shrink-0"
+              style={{ background: '#a78bfa', boxShadow: '0 0 8px rgba(167,139,250,0.55)' }} />
+            <span className="text-xs font-bold" style={{ color: '#c4b5fd' }}>Compare Mode</span>
+            <span className="text-xs" style={{ color: '#475569' }}>
+              — all {archs.length} architectures run simultaneously
+            </span>
+            <div className="flex-1" />
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md"
+              style={{
+                color: '#7c3aed',
+                background: 'rgba(124,58,237,0.1)',
+                border: '1px solid rgba(124,58,237,0.2)',
+              }}>
+              ×{archs.length}
+            </span>
           </div>
         )}
 
         {/* Chat area */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           {isEmpty && (
-            <div className="flex flex-col items-center justify-center h-full gap-5 text-center select-none">
+            <div className="flex flex-col items-center justify-center h-full gap-6 text-center select-none">
+              {/* Icon */}
               <div className="relative">
-                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-violet-600/30 to-violet-900/20 border border-violet-500/25 flex items-center justify-center shadow-glow">
-                  <span className="text-2xl">⚡</span>
+                <div className="absolute inset-0 rounded-3xl blur-2xl -z-10"
+                  style={{ background: 'rgba(124,58,237,0.18)', transform: 'scale(1.3)' }} />
+                <div className="relative w-20 h-20 rounded-3xl flex items-center justify-center text-3xl"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(124,58,237,0.2) 0%, rgba(91,33,182,0.12) 100%)',
+                    border: '1px solid rgba(124,58,237,0.3)',
+                    boxShadow: '0 0 32px rgba(124,58,237,0.12), inset 0 1px 0 rgba(255,255,255,0.06)',
+                  }}>
+                  ⚡
                 </div>
-                <div className="absolute inset-0 rounded-2xl bg-violet-500/10 blur-xl -z-10" />
               </div>
-              <div className="space-y-1.5">
-                <p className="text-base font-bold text-slate-200">RAG Studio</p>
-                <p className="text-sm text-slate-500 max-w-xs leading-relaxed">
+
+              {/* Text */}
+              <div className="space-y-2">
+                <p className="text-[17px] font-bold tracking-tight" style={{ color: '#e2e8f0' }}>RAG Studio</p>
+                <p className="text-sm leading-relaxed max-w-[280px]" style={{ color: '#475569' }}>
                   {compareMode
                     ? 'Upload a document, then ask a question to compare all 10 architectures side by side.'
                     : 'Upload a document or paste a URL, then start asking questions.'}
                 </p>
               </div>
+
+              {/* Upload hint */}
               {ingestedArchs.size === 0 && (
-                <div className="flex items-center gap-2 text-xs text-slate-600 bg-white/[0.03] border border-white/[0.06] rounded-xl px-4 py-2.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                <div className="flex items-center gap-2 text-xs rounded-xl px-4 py-2.5"
+                  style={{
+                    color: '#475569',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid rgba(255,255,255,0.06)',
+                  }}>
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    style={{ background: '#f59e0b' }} />
                   Upload a document from the sidebar to begin
                 </div>
               )}
