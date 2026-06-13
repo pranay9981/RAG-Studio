@@ -395,9 +395,13 @@ export default function Page() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         {currentArch && !compareMode && (
-          <div className="flex items-center justify-between pr-4">
+          <div className="flex items-center border-b border-white/[0.06] bg-[#0d0d1a] flex-shrink-0">
             <ArchCard arch={currentArch} />
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2.5 flex-shrink-0 px-4">
+              <span className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 bg-emerald-400/10 border border-emerald-400/20 px-2.5 py-1 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]" />
+                Active
+              </span>
               <button
                 onClick={() => setShowExplainer(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-slate-400 text-xs font-medium hover:bg-white/[0.07] hover:text-slate-200 transition-colors"

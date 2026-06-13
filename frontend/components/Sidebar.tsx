@@ -75,8 +75,11 @@ export default function Sidebar({
         <span className="text-[9px] font-mono font-bold text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-md flex-shrink-0">v4</span>
       </div>
 
-      {/* ── Architecture list (own scroll region) ─────── */}
-      <div className="px-3 pt-3 pb-2.5 border-b border-white/[0.05] flex-shrink-0">
+      {/* ── Scrollable middle (arch + toggles + docs + history) ── */}
+      <div className="flex-1 overflow-y-auto min-h-0 scrollbar-thin">
+
+      {/* Architecture list (own inner scroll) */}
+      <div className="px-3 pt-3 pb-2.5 border-b border-white/[0.05]">
         <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest mb-2 px-1">Architecture</p>
         <div className="space-y-0.5 overflow-y-auto max-h-[268px] scrollbar-thin pr-0.5">
           {architectures.map(a => {
@@ -142,7 +145,7 @@ export default function Sidebar({
       </div>
 
       {/* ── Toggles ──────────────────────────────────── */}
-      <div className="px-4 py-3 border-b border-white/[0.05] space-y-2.5 flex-shrink-0">
+      <div className="px-4 py-3 border-b border-white/[0.05] space-y-2.5">
         {[
           { label: `Compare All (${architectures.length})`, val: compareMode, fn: onCompareToggle },
           { label: 'RAG Evaluation', val: enableEval, fn: onEvalToggle },
@@ -159,14 +162,14 @@ export default function Sidebar({
         ))}
       </div>
 
-      {/* ── Document Manager (always visible) ────────── */}
-      <div className="border-b border-white/[0.05] flex-shrink-0">
+      {/* ── Document Manager ─────────── */}
+      <div className="border-b border-white/[0.05]">
         {children}
       </div>
 
-      {/* ── History (fills remaining space) ──────────── */}
+      {/* ── History ──────────────────── */}
       {history.length > 0 && (
-        <div className="flex-1 overflow-y-auto min-h-0 border-b border-white/[0.05] scrollbar-thin">
+        <div className="border-b border-white/[0.05]">
           <button
             onClick={() => setHistOpen(o => !o)}
             className="w-full sticky top-0 flex items-center justify-between px-4 py-2.5 text-xs text-slate-500 hover:text-slate-300 transition-colors bg-surface z-10 border-b border-white/[0.03]"
@@ -189,7 +192,9 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* ── Actions ──────────────────────────────────── */}
+      </div>{/* end scrollable middle */}
+
+      {/* ── Actions (always visible at bottom) ───────── */}
       <div className="px-3 py-3 border-t border-white/[0.06] flex-shrink-0">
         <div ref={exportRef} className="relative">
           {exportOpen && (
